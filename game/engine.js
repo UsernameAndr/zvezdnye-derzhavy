@@ -71,7 +71,7 @@ class Game {
       const size = n === 2 ? [3, 5][i] : [3, 4, 5, 5, 5, 5][i];
       this.draw(p, size);
     });
-    this.addLog(`Партия началась! Стартовое влияние: ${this.settings.authority}. Первым ходит ${this.players[0].name}.`, 'sys');
+    this.addLog(`Партия началась! Стартовое здоровье: ${this.settings.authority}. Первым ходит ${this.players[0].name}.`, 'sys');
     this.startTurn();
   }
 
@@ -147,7 +147,7 @@ class Game {
     switch (k) {
       case 'trade': this.pool.trade += v; break;
       case 'combat': this.pool.combat += v; break;
-      case 'auth': p.authority += v; this.addLog(`${p.name} получает +${v} влияния (${p.authority})`, 'auth'); break;
+      case 'auth': p.authority += v; this.addLog(`${p.name} восстанавливает ${v} здоровья (${p.authority})`, 'auth'); break;
       case 'draw': { const g = this.draw(p, v); if (g) this.addLog(`${p.name} берёт ${cardsWord(g)}`); break; }
       case 'opDiscard': {
         const ops = this.opponents();
@@ -436,7 +436,7 @@ class Game {
     if (slot === 'explorer') {
       if (this.explorers <= 0) fail('Старатели закончились');
       d = CARDS.explorer;
-      if (this.pool.trade < d.cost) fail('Не хватает торговли');
+      if (this.pool.trade < d.cost) fail('Не хватает денег');
       this.explorers--;
       card = mk('explorer');
     } else {
@@ -444,7 +444,7 @@ class Game {
       card = this.row[i];
       if (!card) fail('Слот пуст');
       d = def(card);
-      if (this.pool.trade < d.cost) fail('Не хватает торговли');
+      if (this.pool.trade < d.cost) fail('Не хватает денег');
       this.refillRow(i);
     }
     this.pool.trade -= d.cost;
@@ -511,7 +511,7 @@ class Game {
     t.authority -= amount;
     this.addLog(`${p.name} атакует ${t.name}: −${amount} (осталось ${Math.max(0, t.authority)})`, 'attack');
     this.lastEvent = { type: 'hit', target: t.id, amount };
-    if (t.authority <= 0) this.eliminate(t, `💥 ${t.name} теряет всё влияние и выбывает!`);
+    if (t.authority <= 0) this.eliminate(t, `💥 ${t.name} теряет всё здоровье и выбывает!`);
   }
 
   answer(p, a) {

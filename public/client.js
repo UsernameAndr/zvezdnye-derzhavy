@@ -90,9 +90,9 @@
   function effShort(e) {
     const k = Object.keys(e)[0], v = e[k];
     switch (k) {
-      case 'trade': return `<span class="ef">${I.trade}+${v} торговли</span>`;
+      case 'trade': return `<span class="ef">${I.trade}+${v} к деньгам</span>`;
       case 'combat': return `<span class="ef">${I.combat}+${v} урона</span>`;
-      case 'auth': return `<span class="ef">${I.auth}+${v} влияния</span>`;
+      case 'auth': return `<span class="ef">${I.auth}+${v} к здоровью</span>`;
       case 'draw': return `<span class="ef">${I.draw}${v > 1 ? `Взять ${v} карты` : 'Взять карту'}</span>`;
       case 'choose': return `<span class="ef choose">${v.map((o) => o.map(effPlain).join(', ')).join(' <b>или</b> ')}</span>`;
       default: return `<span class="ef tx">${effPlain(e)}</span>`;
@@ -101,7 +101,7 @@
   function effPlain(e) {
     const k = Object.keys(e)[0], v = e[k];
     return {
-      trade: `+${v} торговли`, combat: `+${v} урона`, auth: `+${v} влияния`,
+      trade: `+${v} к деньгам`, combat: `+${v} урона`, auth: `+${v} к здоровью`,
       draw: v > 1 ? `взять ${v} карты` : 'взять карту',
       opDiscard: 'Соперник сбрасывает карту',
       scrapRow: 'Можно убрать карту из ряда',
@@ -122,9 +122,9 @@
   function effLong(e) {
     const k = Object.keys(e)[0], v = e[k];
     return {
-      trade: `+${v} торговли. Торговлей оплачиваются покупки в торговом ряду.`,
+      trade: `+${v} к деньгам. Деньгами оплачиваются покупки в торговом ряду.`,
       combat: `+${v} урона. Уроном атакуют соперников и их базы.`,
-      auth: `+${v} влияния. Влияние — это ваше здоровье.`,
+      auth: `+${v} к здоровью.`,
       draw: v > 1 ? `Возьмите ${cardsWord(v)} из своей колоды.` : 'Возьмите карту из своей колоды.',
       opDiscard: 'Выбранный соперник сбросит одну карту из руки в начале своего хода.',
       scrapRow: 'Можно убрать из игры любую карту торгового ряда — на её место выложится новая.',
@@ -146,7 +146,7 @@
   function typeName(d) { return d.type === 'base' ? (d.outpost ? 'Аванпост' : 'База') : 'Корабль'; }
   function typeExplain(d) {
     if (d.id === 'scout' || d.id === 'viper') return 'Стартовая карта. Корабль: действует в тот ход, когда его сыграли, затем уходит в сброс.';
-    if (d.id === 'explorer') return 'Старатель всегда доступен для покупки за 2 торговли. Корабль: действует в тот ход, когда его сыграли.';
+    if (d.id === 'explorer') return 'Старатель всегда доступен для покупки, цена — 2. Корабль: действует в тот ход, когда его сыграли.';
     if (d.type !== 'base') return 'Корабль. Действует в тот ход, когда вы его сыграли, затем уходит в сброс и вернётся с новой колодой.';
     if (d.outpost) return `Аванпост. Остаётся на столе и действует каждый ваш ход. Пока он стоит, соперники не могут атаковать вас и ваши другие базы — сначала им придётся потратить ${d.defense} урона на него.`;
     return `База. Остаётся на столе и действует каждый ваш ход. Соперник может уничтожить её, потратив ${d.defense} урона.`;
@@ -250,23 +250,23 @@
   // ───────────────── правила ─────────────────
   function rulesShortHTML() {
     return `<ol class="short-rules">
-      <li><b>Цель</b> — довести влияние (здоровье) всех соперников до нуля.</li>
-      <li><b>Сыграйте карты из руки.</b> Они дают ${I.trade} торговлю, ${I.combat} урон и ${I.auth} влияние.</li>
-      <li><b>Купите карты</b> из торгового ряда за торговлю. Покупки уходят в ваш сброс и попадут в руку позже.</li>
+      <li><b>Цель</b> — довести здоровье всех соперников до нуля.</li>
+      <li><b>Сыграйте карты из руки.</b> Они дают ${I.trade} деньги, ${I.combat} урон и ${I.auth} здоровье.</li>
+      <li><b>Купите карты</b> из торгового ряда за деньги. Покупки уходят в ваш сброс и попадут в руку позже.</li>
       <li><b>Атакуйте</b> уроном соперника или его базы. Пока у соперника есть <b>аванпост</b>, сначала бейте его.</li>
-      <li><b>Завершите ход</b> — вы возьмёте 5 новых карт. Несыгранная торговля и урон сгорают.</li>
+      <li><b>Завершите ход</b> — вы возьмёте 5 новых карт. Непотраченные деньги и урон сгорают.</li>
       <li><b>Союз</b> — бонус, если в ход сыграно 2+ карты одной фракции. <b>Утиль</b> — убрать карту из игры ради эффекта.</li>
     </ol>`;
   }
   function showRules() {
     openModal(`<div class="rules"><h2>Правила</h2>${rulesShortHTML()}
       <h4>Подробнее</h4>
-      <p>У каждого колода из 10 карт: 8 «Курьеров» (+1 торговли) и 2 «Перехватчика» (+1 урона). Первый игрок начинает с 3 картами, второй — с 5 (в игре на троих и больше: 3, 4, затем по 5). Когда колода кончается, сброс перемешивается в новую колоду.</p>
+      <p>У каждого колода из 10 карт: 8 «Курьеров» (+1 к деньгам) и 2 «Перехватчика» (+1 урона). Первый игрок начинает с 3 картами, второй — с 5 (в игре на троих и больше: 3, 4, затем по 5). Когда колода кончается, сброс перемешивается в новую колоду.</p>
       <p><b>Корабли</b> действуют один ход и уходят в сброс. <b>Базы</b> остаются на столе и действуют каждый ваш ход; простые эффекты баз срабатывают сами, а если нужно выбирать — нажмите «Использовать». Чтобы уничтожить базу, потратьте урон, равный её защите (число в щите). Тёмный щит — <b>аванпост</b>: он защищает владельца и его остальные базы.</p>
       <h4>Фракции</h4>
       <div class="fac-list">
         <div>${emblem('blob')} <b>Рой</b> — много урона, чистит торговый ряд.</div>
-        <div>${emblem('trade')} <b>Торговая Лига</b> — торговля и восстановление влияния.</div>
+        <div>${emblem('trade')} <b>Торговая Лига</b> — деньги и восстановление здоровья.</div>
         <div>${emblem('empire')} <b>Корона</b> — добор карт и сброс карт у соперников.</div>
         <div>${emblem('machine')} <b>Машинный Орден</b> — утилизация слабых карт, прочные аванпосты.</div>
       </div>
@@ -310,7 +310,7 @@
       $('#h-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(e.target.value); });
     }
     $('#h-rooms').innerHTML = S.rooms.length
-      ? S.rooms.map((r) => `<button class="room-item" data-act="join-code" data-code="${r.code}"><b>${esc(r.host)}</b><span>${r.count}/${r.max} игроков · влияние ${r.authority}</span><i>${r.code}</i></button>`).join('')
+      ? S.rooms.map((r) => `<button class="room-item" data-act="join-code" data-code="${r.code}"><b>${esc(r.host)}</b><span>${r.count}/${r.max} игроков · здоровье ${r.authority}</span><i>${r.code}</i></button>`).join('')
       : '<div class="empty">Открытых столов нет. Создайте свой и отправьте друзьям ссылку.</div>';
   }
   function needName() {
@@ -368,7 +368,7 @@
       $$('.seg[data-k]', sEl).forEach((b) => b.classList.toggle('on', String(st[b.dataset.k]) === b.dataset.v));
     } else {
       sEl.innerHTML = `
-        <div class="set"><div class="set-l">Стартовое влияние (здоровье)</div>
+        <div class="set"><div class="set-l">Стартовое здоровье</div>
           <div class="segs">${chips('authority', [20, 30, 40, 50, 75, 100], st.authority)}</div>
           ${host ? `<label class="custom">Своё значение <input id="l-auth" type="number" min="1" max="999" value="${st.authority}"></label>` : ''}
         </div>
@@ -421,7 +421,7 @@
     const manual = me.bases.filter((b) => CARDS[b.cid].primary.length && !(b.used && b.used.primary));
     if (manual.length) return { text: `Используйте базу «${esc(CARDS[manual[0].cid].name)}» — кнопка «Использовать» на карте.`, cue: 'bases' };
     const affordable = g.row.some((c) => c && CARDS[c.cid].cost <= g.pool.trade) || (g.explorers > 0 && g.pool.trade >= 2);
-    if (affordable) return { text: `<b>Шаг 2.</b> У вас ${g.pool.trade} торговли — купите карту из ряда (подсвечены). Купленное попадёт в ваш сброс.`, cue: 'market' };
+    if (affordable) return { text: `<b>Шаг 2.</b> Денег: ${g.pool.trade} — купите карту из ряда (подсвечены). Купленное попадёт в ваш сброс.`, cue: 'market' };
     if (g.pool.combat > 0) {
       const ops = g.players.filter((p) => p.alive && p.id !== S.pid);
       const blockedByOut = ops.length && ops.every((p) => C.hasOutpost(p));
@@ -491,7 +491,7 @@
       return `<div class="opp ${p.id === g.turn ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
         <div class="opp-head"><span class="avatar">${esc(p.name[0].toUpperCase())}</span>
           <div class="opp-nm"><b>${esc(p.name)}</b>${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
-          <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Влияние (здоровье)">${Math.max(0, p.authority)}</div></div>
+          <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Здоровье">${Math.max(0, p.authority)}</div></div>
         ${p.alive ? `<div class="opp-meta"><span title="Карт в руке">рука ${p.handCount}</span><span title="Карт в колоде">колода ${p.deckCount}</span>
           <button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>
           ${p.pendingDiscard ? `<span class="tag-s warn">сбросит ${p.pendingDiscard}</span>` : ''}</div>
@@ -543,8 +543,8 @@
         <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
         <section class="actionbar ${myTurn ? 'my-turn' : ''}" style="--pc:${colorOf(me.id)}">
           <div class="stats">
-            <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="Ваше влияние (здоровье)">${I.auth}<b>${Math.max(0, me.authority)}</b><small>влияние</small></div>
-            <div class="stat" title="Торговля на этот ход">${I.trade}<b>${myTurn ? trade : 0}</b><small>торговля</small></div>
+            <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="Ваше здоровье">${I.auth}<b>${Math.max(0, me.authority)}</b><small>здоровье</small></div>
+            <div class="stat" title="Деньги на этот ход">${I.trade}<b>${myTurn ? trade : 0}</b><small>деньги</small></div>
             <div class="stat" title="Урон на этот ход">${I.combat}<b>${myTurn ? combat : 0}</b><small>урон</small></div>
             <button class="stat pile" data-act="view-deck" title="Колода">${I.draw}<b>${me.deckCount}</b><small>колода</small></button>
             <button class="stat pile" data-act="view-discard" data-pid="${me.id}" title="Сброс">${top ? '▤' : '▢'}<b>${me.discard.length}</b><small>сброс</small></button>
@@ -577,7 +577,7 @@
         <div class="strip">${rowHTML}${expHTML}</div>
       </section>
       <div class="table-row"><section class="zone play-zone" style="--pc:${colorOf(g.turn)}">
-        <div class="zl">${isMe ? 'Вы сыграли' : `Сыграно: ${esc(cur.name)}`} ${!isMe ? `<span class="muted">· торговля ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
+        <div class="zl">${isMe ? 'Вы сыграли' : `Сыграно: ${esc(cur.name)}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
         <div class="strip">${playHTML || '<span class="none">Пока ничего</span>'}</div>
       </section>${basesZone}</div>
       ${mineHTML}
@@ -623,7 +623,7 @@
     if (pr.kind === 'choose') {
       body = `<div class="choices">${pr.options.map((o, i) => `<button class="choice" data-act="choose" data-i="${i}">${o.map(effShort).join('')}</button>`).join('')}</div>`;
     } else if (pr.kind === 'opponent') {
-      body = `<div class="choices">${pr.options.map((id) => { const p = g.players.find((x) => x.id === id); return `<button class="choice" data-act="opp" data-target="${id}"><b>${esc(p.name)}</b><small>карт в руке ${p.handCount} · влияние ${p.authority}</small></button>`; }).join('')}</div>`;
+      body = `<div class="choices">${pr.options.map((id) => { const p = g.players.find((x) => x.id === id); return `<button class="choice" data-act="opp" data-target="${id}"><b>${esc(p.name)}</b><small>карт в руке ${p.handCount} · здоровье ${p.authority}</small></button>`; }).join('')}</div>`;
     } else {
       const zoneName = { hand: 'из руки', discard: 'из сброса', row: 'из ряда', base: 'база', explorer: 'стопка', play: 'в игре' };
       body = `<div class="pick-grid">${pr.cards.map((c) => {
@@ -657,7 +657,7 @@
     if (zone === 'hand') return `<button class="btn primary" data-act="play" data-uid="${uid}">Сыграть карту</button>`;
     if (zone === 'row') {
       const slot = el.dataset.slot;
-      return `<button class="btn primary" data-act="buy" data-slot="${slot}" ${C.g.pool.trade >= d.cost ? '' : 'disabled'}>Купить за ${d.cost}</button>${C.g.pool.trade < d.cost ? `<span class="muted small">У вас ${C.g.pool.trade} торговли</span>` : ''}`;
+      return `<button class="btn primary" data-act="buy" data-slot="${slot}" ${C.g.pool.trade >= d.cost ? '' : 'disabled'}>Купить за ${d.cost}</button>${C.g.pool.trade < d.cost ? `<span class="muted small">Денег: ${C.g.pool.trade}</span>` : ''}`;
     }
     if (zone === 'oppbase') {
       const owner = C.g.players.find((p) => p.id === el.dataset.owner);
@@ -691,7 +691,7 @@
       return `<div class="ob">${cardHTML(b, { size: 'sm', attrs: `data-zone="oppbase" data-owner="${p.id}"` })}${can ? `<button class="btn danger sm" data-act="atkbase" data-target="${p.id}" data-uid="${b.uid}">Уничтожить (${CARDS[b.cid].defense})</button>` : ''}</div>`;
     }).join('');
     const html = `<h3>${esc(p.name)}</h3>
-      <div class="os-stats"><span>${I.auth} влияние <b>${Math.max(0, p.authority)}</b></span><span>в руке ${p.handCount}</span><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button></div>
+      <div class="os-stats"><span>${I.auth} здоровье <b>${Math.max(0, p.authority)}</b></span><span>в руке ${p.handCount}</span><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button></div>
       ${C.hasOutpost(p) ? '<p class="muted">Защищён аванпостом: сначала уничтожьте аванпост, потом можно атаковать игрока и другие базы.</p>' : ''}
       <div class="sec-title">Базы</div><div class="ob-grid">${bases || '<span class="none">Нет баз</span>'}</div>
       ${canAtk ? `<div class="m-actions"><button class="btn danger big" data-act="atkplayer" data-target="${p.id}">Атаковать (${C.g.pool.combat} урона)</button></div>` : ''}`;
@@ -710,7 +710,7 @@
     const g = S.room.game;
     const p = g.players.find((x) => x.id === target);
     const max = g.pool.combat;
-    openModal(`<h3>Атаковать: ${esc(p.name)}</h3><p class="muted">Влияние соперника — ${p.authority}. У вас ${max} урона${g.players.filter((x) => x.alive).length > 2 ? '; урон можно разделить между соперниками' : ''}.</p>
+    openModal(`<h3>Атаковать: ${esc(p.name)}</h3><p class="muted">Здоровье соперника — ${p.authority}. У вас ${max} урона${g.players.filter((x) => x.alive).length > 2 ? '; урон можно разделить между соперниками' : ''}.</p>
       <div class="stepper"><button class="btn" id="a-minus">−</button><input id="a-val" type="number" min="1" max="${max}" value="${max}"><button class="btn" id="a-plus">+</button></div>
       <div class="m-actions"><button class="btn" data-act="close-modal">Отмена</button><button class="btn danger" id="a-go">Нанести урон</button></div>`, { kind: 'attack' });
     const inp = $('#a-val');
@@ -729,7 +729,7 @@
     if (unused.length) warn.push(`не использованы базы: ${unused.map((b) => '«' + CARDS[b.cid].name + '»').join(', ')}`);
     if (g.pool.combat > 0 && g.players.some((p) => p.alive && p.id !== S.pid)) warn.push(`не потрачен урон (${g.pool.combat})`);
     const cheapest = Math.min(...g.row.filter(Boolean).map((c) => CARDS[c.cid].cost), g.explorers ? 2 : 99);
-    if (g.pool.trade >= cheapest) warn.push(`осталось ${g.pool.trade} торговли — можно купить карту`);
+    if (g.pool.trade >= cheapest) warn.push(`остались деньги (${g.pool.trade}) — можно купить карту`);
     if (!warn.length) return act({ type: 'endTurn' });
     confirmBox(`Завершить ход?<small class="warn-list">${warn.map((w) => '• ' + esc(w)).join('<br>')}</small>`, 'Завершить ход', () => act({ type: 'endTurn' }));
   }
