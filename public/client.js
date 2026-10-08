@@ -262,7 +262,11 @@
     const st = r.settings;
     const chips = (k, vals, cur, fmt = (v) => v) => vals.map((v) => `<button class="chip-btn ${cur === v ? 'on' : ''}" ${host ? `data-act="set" data-k="${k}" data-v="${v}"` : 'disabled'}>${fmt(v)}</button>`).join('');
     const sEl = $('#l-settings');
-    if (!sEl.contains(document.activeElement)) {
+    // пока хост печатает своё число влияния, поле не трогаем — обновляем только подсветку кнопок
+    const typing = document.activeElement && document.activeElement.id === 'l-auth';
+    if (typing) {
+      sEl.querySelectorAll('.chip-btn[data-k]').forEach((b) => b.classList.toggle('on', String(st[b.dataset.k]) === b.dataset.v));
+    } else {
       sEl.innerHTML = `
         <div class="set"><div class="set-l">Стартовое влияние (здоровье)</div>
           <div class="chips">${chips('authority', [20, 30, 40, 50, 75, 100], st.authority)}</div>
