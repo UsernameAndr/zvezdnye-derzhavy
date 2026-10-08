@@ -1,0 +1,16 @@
+{
+  "name": "star-powers-online",
+  "version": "1.0.0",
+  "description": "Звёздные Державы — онлайн колодостроительная космическая игра на 2–6 игроков",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/rules.js && node test/simulate.js 300"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
