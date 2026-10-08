@@ -2,6 +2,7 @@
   'use strict';
   const { CARDS, FACTIONS } = window;
   const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
   const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -21,12 +22,17 @@
     name: store.get('sd_name') || '',
     room: null, rooms: [], screen: null,
     sel: [], selKey: null,
-    side: 'log', sideOpen: false, unread: 0, chatSeen: 0,
+    side: 'log', sideOpen: false, unread: 0, chatSeenUser: undefined,
     pendingJoin: (new URLSearchParams(location.search).get('room') || '').toUpperCase(),
     prevAuth: {}, wasMyTurn: false, modal: null, sound: store.get('sd_sound') !== '0',
+    goShown: false, tutorialShown: false,
   };
   const isTouch = matchMedia('(hover: none)').matches;
-  const PCOLORS = ['#ffb347', '#7fd1ff', '#c59bff', '#7dff9e', '#ff8fb1', '#ffe066'];
+  const mqMobile = matchMedia('(max-width: 760px)');
+  const isMobile = () => mqMobile.matches;
+  const mqWide = matchMedia('(min-width: 1101px)');
+  for (const mq of [mqMobile, mqWide]) mq.addEventListener && mq.addEventListener('change', () => { S.screen = null; render(); });
+  const PCOLORS = ['#d9a54a', '#5fa8d3', '#a78bd4', '#6cc28f', '#d4708f', '#c9c25a'];
 
   // ───────────────── сеть ─────────────────
   function connect() {
@@ -34,11 +40,7 @@
     S.ws = ws;
     ws.onopen = () => { S.connected = true; $('#conn').classList.add('hidden'); send({ t: 'hello', token, name: S.name }); };
     ws.onmessage = (ev) => { let m; try { m = JSON.parse(ev.data); } catch { return; } onMsg(m); };
-    ws.onclose = () => {
-      S.connected = false;
-      $('#conn').classList.remove('hidden');
-      setTimeout(connect, 1500);
-    };
+    ws.onclose = () => { S.connected = false; $('#conn').classList.remove('hidden'); setTimeout(connect, 1500); };
   }
   const send = (o) => { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(o)); };
   const act = (a) => send({ t: 'act', a });
@@ -72,51 +74,97 @@
     }
   }
 
-  // ───────────────── иконки ─────────────────
+  // ───────────────── значки и тексты ─────────────────
   const EMB = {
-    blob: '<path d="M10 1.5c4.6 0 8 3.3 8 7.6 0 3-1.7 5.2-3.6 6.4l1.4 3.2-3.6-2c-.7.2-1.4.3-2.2.3-4.6 0-8-3.3-8-7.9S5.4 1.5 10 1.5z"/><circle cx="12.6" cy="8" r="2.2" fill="#0a1a0a"/><circle cx="6.8" cy="10.6" r="1.1" fill="#0a1a0a" opacity=".6"/>',
+    blob: '<path d="M10 1.5c4.6 0 8 3.3 8 7.6 0 3-1.7 5.2-3.6 6.4l1.4 3.2-3.6-2c-.7.2-1.4.3-2.2.3-4.6 0-8-3.3-8-7.9S5.4 1.5 10 1.5z"/><circle cx="12.6" cy="8" r="2.2" fill="#0b0e14"/>',
     trade: '<path d="M10 1l8 4.6v8.8L10 19l-8-4.6V5.6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5l4 5-4 5-4-5z"/>',
     empire: '<path d="M10 1.2l2.5 5.6 6.1.6-4.6 4.1 1.3 6-5.3-3.1-5.3 3.1 1.3-6L1.4 7.4l6.1-.6z"/>',
-    machine: '<path d="M8.6 1h2.8l.5 2.4 1.6.7 2.1-1.3 2 2-1.3 2.1.7 1.6 2.4.5v2.8l-2.4.5-.7 1.6 1.3 2.1-2 2-2.1-1.3-1.6.7-.5 2.4H8.6l-.5-2.4-1.6-.7-2.1 1.3-2-2 1.3-2.1-.7-1.6L1 11.4V8.6l2.4-.5.7-1.6-1.3-2.1 2-2 2.1 1.3 1.6-.7z"/><circle cx="10" cy="10" r="3.2" fill="#1a0505"/>',
+    machine: '<path d="M8.6 1h2.8l.5 2.4 1.6.7 2.1-1.3 2 2-1.3 2.1.7 1.6 2.4.5v2.8l-2.4.5-.7 1.6 1.3 2.1-2 2-2.1-1.3-1.6.7-.5 2.4H8.6l-.5-2.4-1.6-.7-2.1 1.3-2-2 1.3-2.1-.7-1.6L1 11.4V8.6l2.4-.5.7-1.6-1.3-2.1 2-2 2.1 1.3 1.6-.7z"/><circle cx="10" cy="10" r="3.2" fill="#0b0e14"/>',
     none: '<circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="10" r="2.5"/>',
   };
-  const emblem = (f, cls = '') => `<svg class="emb ${cls}" viewBox="0 0 20 20" style="color:${FACTIONS[f].color};fill:${FACTIONS[f].color}">${EMB[f]}</svg>`;
-  const TRASH = '<svg class="emb" viewBox="0 0 20 20" fill="#c9d1dc"><path d="M7 2h6l1 2h4v2H2V4h4zM4 7h12l-1 11H5z"/><path d="M8 9v7M12 9v7" stroke="#1b2029" stroke-width="1.4"/></svg>';
-  const TRASH_SM = '<svg viewBox="0 0 20 20" width="10" height="10" fill="currentColor"><path d="M7 2h6l1 2h4v2H2V4h4zM4 7h12l-1 11H5z"/></svg>';
-  const IC = {
-    trade: (v) => `<span class="ic ic-trade" title="Торговля"><b>${v}</b></span>`,
-    combat: (v) => `<span class="ic ic-combat" title="Урон"><b>${v}</b></span>`,
-    auth: (v) => `<span class="ic ic-auth" title="Влияние"><b>+${v}</b></span>`,
-  };
+  const emblem = (f) => `<svg class="emb" viewBox="0 0 20 20" style="color:${FACTIONS[f].color};fill:${FACTIONS[f].color}">${EMB[f]}</svg>`;
+  const TRASH = '<svg class="emb" viewBox="0 0 20 20" fill="currentColor"><path d="M7 2h6l1 2h4v2H2V4h4zM4 7h12l-1 11H5z"/></svg>';
+  const I = { trade: '<i class="i i-trade"></i>', combat: '<i class="i i-combat"></i>', auth: '<i class="i i-auth"></i>', draw: '<i class="i i-draw"></i>' };
 
-  function eff(e) {
+  // короткая надпись на карте
+  function effShort(e) {
     const k = Object.keys(e)[0], v = e[k];
     switch (k) {
-      case 'trade': return IC.trade(v);
-      case 'combat': return IC.combat(v);
-      case 'auth': return IC.auth(v);
-      case 'draw': return `<span class="tx">${v > 1 ? `Возьмите ${cardsWord(v)}` : 'Возьмите карту'}</span>`;
-      case 'opDiscard': return `<span class="tx">Соперник сбрасывает карту</span>`;
-      case 'scrapRow': return `<span class="tx">Можно утилизировать карту из торгового ряда</span>`;
-      case 'scrapHD': return `<span class="tx">Можно утилизировать карту из руки или сброса</span>`;
-      case 'destroyBase': return `<span class="tx">Можно уничтожить базу</span>`;
-      case 'choose': return `<span class="choose">${v.map((o) => `<span class="opt">${o.map(eff).join(' ')}</span>`).join('<i class="or">или</i>')}</span>`;
-      case 'topNext': return `<span class="tx">Следующий купленный корабль — на верх колоды</span>`;
-      case 'freeShip': return `<span class="tx">Возьмите любой корабль из ряда бесплатно на верх колоды</span>`;
-      case 'yacht': return `<span class="tx">Если у вас 2+ базы — возьмите 2 карты</span>`;
-      case 'blobDraw': return `<span class="tx">Карта за каждую карту Роя, сыгранную в этот ход</span>`;
-      case 'recycle': return `<span class="tx">Сбросьте до 2 карт и возьмите столько же</span>`;
-      case 'machineBase': return `<span class="tx">Возьмите карту, затем утилизируйте карту из руки</span>`;
-      case 'brain': return `<span class="tx">Утилизируйте до 2 карт из руки/сброса, возьмите столько же</span>`;
-      case 'copy': return `<span class="tx">Скопируйте другой ваш корабль, сыгранный в этот ход</span>`;
-      default: return '';
+      case 'trade': return `<span class="ef">${I.trade}+${v} торговли</span>`;
+      case 'combat': return `<span class="ef">${I.combat}+${v} урона</span>`;
+      case 'auth': return `<span class="ef">${I.auth}+${v} влияния</span>`;
+      case 'draw': return `<span class="ef">${I.draw}${v > 1 ? `Взять ${v} карты` : 'Взять карту'}</span>`;
+      case 'choose': return `<span class="ef choose">${v.map((o) => o.map(effPlain).join(', ')).join(' <b>или</b> ')}</span>`;
+      default: return `<span class="ef tx">${effPlain(e)}</span>`;
     }
   }
-  const abil = (list) => {
-    const nums = list.filter((e) => ['trade', 'combat', 'auth'].includes(Object.keys(e)[0]));
-    const rest = list.filter((e) => !nums.includes(e));
-    return (nums.length ? `<span class="nums">${nums.map(eff).join('')}</span>` : '') + rest.map(eff).join('');
-  };
+  function effPlain(e) {
+    const k = Object.keys(e)[0], v = e[k];
+    return {
+      trade: `+${v} торговли`, combat: `+${v} урона`, auth: `+${v} влияния`,
+      draw: v > 1 ? `взять ${v} карты` : 'взять карту',
+      opDiscard: 'Соперник сбрасывает карту',
+      scrapRow: 'Можно убрать карту из ряда',
+      scrapHD: 'Можно утилизировать карту из руки/сброса',
+      destroyBase: 'Можно уничтожить базу',
+      topNext: 'След. корабль — на верх колоды',
+      freeShip: 'Бесплатный корабль из ряда',
+      yacht: 'Если 2+ базы — взять 2 карты',
+      blobDraw: 'Карта за каждую карту Роя',
+      recycle: 'Сбросить до 2 карт и взять столько же',
+      machineBase: 'Взять карту, затем утилизировать карту из руки',
+      brain: 'Утилизировать до 2 карт, взять столько же',
+      copy: 'Повторяет другой ваш корабль',
+      choose: '',
+    }[k] || (k === 'choose' ? v.map((o) => o.map(effPlain).join(', ')).join(' или ') : '');
+  }
+  // подробное объяснение
+  function effLong(e) {
+    const k = Object.keys(e)[0], v = e[k];
+    return {
+      trade: `+${v} торговли. Торговлей оплачиваются покупки в торговом ряду.`,
+      combat: `+${v} урона. Уроном атакуют соперников и их базы.`,
+      auth: `+${v} влияния. Влияние — это ваше здоровье.`,
+      draw: v > 1 ? `Возьмите ${cardsWord(v)} из своей колоды.` : 'Возьмите карту из своей колоды.',
+      opDiscard: 'Выбранный соперник сбросит одну карту из руки в начале своего хода.',
+      scrapRow: 'Можно убрать из игры любую карту торгового ряда — на её место выложится новая.',
+      scrapHD: 'Можно навсегда убрать из игры одну карту из руки или сброса. Так колода избавляется от слабых карт.',
+      destroyBase: 'Можно уничтожить любую базу соперника, даже аванпост, не тратя урон.',
+      choose: '',
+      topNext: 'Следующий корабль, купленный в этот ход, ляжет на верх колоды — вы возьмёте его уже в следующем ходу.',
+      freeShip: 'Возьмите любой корабль из торгового ряда бесплатно. Он ляжет на верх колоды.',
+      yacht: 'Если у вас в игре две базы или больше, возьмите 2 карты.',
+      blobDraw: 'Возьмите по карте за каждую карту Роя, сыгранную в этот ход.',
+      recycle: 'Сбросьте до двух карт из руки и возьмите столько же новых.',
+      machineBase: 'Возьмите карту, затем обязательно утилизируйте одну карту из руки.',
+      brain: 'Утилизируйте до двух карт из руки или сброса и возьмите столько же новых.',
+      copy: 'Выберите другой ваш корабль, сыгранный в этот ход: эта карта повторит его действие и станет той же фракции.',
+    }[k] || (k === 'choose' ? 'Выберите одно: ' + v.map((o) => o.map(effPlain).join(', ')).join(' или ') + '.' : '');
+  }
+  const abil = (list) => list.map(effShort).join('');
+
+  function typeName(d) { return d.type === 'base' ? (d.outpost ? 'Аванпост' : 'База') : 'Корабль'; }
+  function typeExplain(d) {
+    if (d.id === 'scout' || d.id === 'viper') return 'Стартовая карта. Корабль: действует в тот ход, когда его сыграли, затем уходит в сброс.';
+    if (d.id === 'explorer') return 'Старатель всегда доступен для покупки за 2 торговли. Корабль: действует в тот ход, когда его сыграли.';
+    if (d.type !== 'base') return 'Корабль. Действует в тот ход, когда вы его сыграли, затем уходит в сброс и вернётся с новой колодой.';
+    if (d.outpost) return `Аванпост. Остаётся на столе и действует каждый ваш ход. Пока он стоит, соперники не могут атаковать вас и ваши другие базы — сначала им придётся потратить ${d.defense} урона на него.`;
+    return `База. Остаётся на столе и действует каждый ваш ход. Соперник может уничтожить её, потратив ${d.defense} урона.`;
+  }
+
+  // сводка для мини-карты
+  function summary(d) {
+    const parts = [];
+    const one = (e) => { const k = Object.keys(e)[0], v = e[k]; return I[k] ? `<span>${I[k]}${v}</span>` : ''; };
+    for (const e of d.primary) {
+      const k = Object.keys(e)[0];
+      if (k === 'choose') parts.push(`<span>${e.choose.map((o) => o.map(one).join('')).join('/')}</span>`);
+      else if (I[k] && k !== 'draw') parts.push(one(e));
+      else if (k === 'draw') parts.push(`<span>${I.draw}${e.draw}</span>`);
+    }
+    if (!parts.length) parts.push('<span class="star">★</span>');
+    return parts.join('');
+  }
 
   // ───────────────── карты ─────────────────
   function cardHTML(c, o = {}) {
@@ -124,31 +172,53 @@
     const d = CARDS[cid];
     const F = FACTIONS[d.faction];
     const used = c.used || {};
-    const typeName = d.type === 'base' ? (d.outpost ? 'Аванпост' : 'База') : 'Корабль';
-    const cls = ['card', 'f-' + d.faction, o.size || 'md', d.type === 'base' ? 'is-base' : '', d.outpost ? 'is-outpost' : '', o.cls || ''].join(' ');
+    const size = o.size || 'md';
+    const base = d.type === 'base';
+    const style = `--fc:${F.color};--fd:${F.dark};--fl:${F.light}`;
+    const attrs = `data-cid="${cid}" ${c.uid ? `data-uid="${c.uid}"` : ''} ${o.attrs || ''}`;
+    const art = `<img class="c-art" src="${window.cardArtURL(cid)}" alt="" draggable="false">`;
+    const cls = `card ${size} f-${d.faction} ${base ? 'is-base' : ''} ${d.outpost ? 'is-outpost' : ''} ${o.cls || ''}`;
+    const defBadge = base ? `<span class="c-def ${d.outpost ? 'out' : ''}" title="${d.outpost ? 'Аванпост — защищает владельца' : 'Защита базы'}">${d.defense}</span>` : '';
+    if (size === 'mini') {
+      return `<div class="${cls}" ${attrs} style="${style}">${art}
+        ${d.cost ? `<span class="c-cost">${d.cost}</span>` : ''}${defBadge}
+        <div class="m-foot"><div class="m-sum">${summary(d)}</div><div class="m-name">${esc(d.name)}</div></div>
+        ${c.copied ? '<span class="c-copy">копия</span>' : ''}${o.badge || ''}
+        ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}</div>`;
+    }
     let prim = abil(d.primary);
-    if (d.fleetHQ) prim += `<span class="tx">Все ваши корабли получают ${IC.combat(1)}</span>`;
-    if (d.allAlly) prim += `<span class="tx">Союзник для карт всех фракций</span>`;
-    return `<div class="${cls}" data-cid="${cid}" ${c.uid ? `data-uid="${c.uid}"` : ''} ${o.attrs || ''} style="--fc:${F.color};--fd:${F.dark};--fl:${F.light}">
-      <div class="c-top"><span class="c-name">${esc(d.name)}</span>${d.cost ? `<span class="c-cost">${d.cost}</span>` : ''}</div>
-      <div class="c-art">${window.cardArt(cid)}${c.copied ? '<span class="c-copy">копия · Мимикр</span>' : ''}</div>
-      <div class="c-type">${emblem(d.faction)}<span>${typeName}${d.faction !== 'none' ? ` · ${F.name}` : ''}</span></div>
-      <div class="c-body">
-        ${prim ? `<div class="ab ab-p ${o.manual && !used.primary ? 'ready' : ''}">${prim}</div>` : ''}
-        ${d.ally.length ? `<div class="ab ab-a ${used.ally ? 'done' : ''}"><span class="ab-ic">${emblem(d.faction)}</span><div class="ab-c">${abil(d.ally)}</div></div>` : ''}
-        ${d.scrap.length ? `<div class="ab ab-s"><span class="ab-ic">${TRASH}</span><div class="ab-c">${abil(d.scrap)}</div></div>` : ''}
+    if (d.fleetHQ) prim += `<span class="ef tx">Все ваши корабли получают +1 урона</span>`;
+    if (d.allAlly) prim += `<span class="ef tx">Считается союзником для карт любой фракции</span>`;
+    return `<div class="${cls}" ${attrs} style="${style}">
+      <div class="c-head"><span class="c-name">${esc(d.name)}</span>${d.cost ? `<span class="c-cost">${d.cost}</span>` : ''}</div>
+      <div class="c-artwrap">${art}${c.copied ? '<span class="c-copy">копия · Мимикр</span>' : ''}</div>
+      <div class="c-type">${emblem(d.faction)}<span class="tn">${typeName(d)}${d.faction !== 'none' ? ` · ${F.name}` : ''}</span>${defBadge}</div>
+      <div class="c-text">
+        ${prim ? `<div class="ab ab-p ${o.manual && base && d.primary.length && !used.primary ? 'ready' : ''}">${prim}</div>` : ''}
+        ${d.ally.length ? `<div class="ab ab-a ${used.ally ? 'done' : ''}"><span class="lbl">${emblem(d.faction)}Союз</span>${abil(d.ally)}</div>` : ''}
+        ${d.scrap.length ? `<div class="ab ab-s"><span class="lbl">${TRASH}Утиль</span>${abil(d.scrap)}</div>` : ''}
       </div>
-      ${d.type === 'base' ? `<div class="c-def ${d.outpost ? 'out' : ''}" title="${d.outpost ? 'Аванпост: защищает владельца' : 'Защита базы'}"><b>${d.defense}</b></div>` : ''}
       ${o.badge || ''}
       ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}
     </div>`;
   }
 
-  function backHTML(label, count, size = 'md', extra = '') {
-    return `<div class="card back ${size}" ${extra}><div class="back-in"><div class="back-logo">ЗД</div></div>${count !== undefined ? `<div class="pile-count">${count}</div>` : ''}${label ? `<div class="pile-label">${label}</div>` : ''}</div>`;
+  function detailHTML(c, actions) {
+    const cid = c.copied || c.cid;
+    const d = CARDS[cid], F = FACTIONS[d.faction];
+    const list = (arr) => `<ul>${arr.map((e) => `<li>${effLong(e)}</li>`).join('')}</ul>`;
+    let info = `<div class="d-title">${esc(d.name)}</div>
+      <div class="d-sub">${emblem(d.faction)} ${typeName(d)}${d.faction !== 'none' ? ' · ' + F.name : ''}${d.cost ? ` · цена ${d.cost}` : ''}${d.type === 'base' ? ` · защита ${d.defense}` : ''}</div>
+      <p class="d-type">${typeExplain(d)}</p>`;
+    if (d.primary.length) info += `<h5>${d.type === 'base' ? 'Каждый ваш ход' : 'Когда разыграна'}</h5>${list(d.primary)}`;
+    if (d.fleetHQ) info += `<h5>Постоянно</h5><ul><li>Каждый корабль, который вы играете, даёт дополнительно +1 урона.</li></ul>`;
+    if (d.allAlly) info += `<h5>Постоянно</h5><ul><li>Пока эта база в игре, у всех ваших карт срабатывают союзные способности.</li></ul>`;
+    if (d.ally.length) info += `<h5>${emblem(d.faction)} Союзная способность</h5><p class="muted">Срабатывает, если в этот ход у вас в игре есть ещё одна карта фракции «${F.name}» (корабль или база).</p>${list(d.ally)}`;
+    if (d.scrap.length) info += `<h5>${TRASH} Утилизация</h5><p class="muted">Кнопкой «Утилизировать»: карта навсегда уходит из игры, а вы получаете эффект.</p>${list(d.scrap)}`;
+    return `<div class="detail"><div class="d-card">${cardHTML({ cid, copied: null }, { size: 'lg' })}</div><div class="d-info">${info}${actions ? `<div class="d-actions">${actions}</div>` : ''}</div></div>`;
   }
 
-  // ───────────────── модальные окна / уведомления ─────────────────
+  // ───────────────── окна и уведомления ─────────────────
   function toast(msg, kind = '') {
     const el = document.createElement('div');
     el.className = 'toast ' + kind;
@@ -159,23 +229,53 @@
   }
   function openModal(html, opts = {}) {
     S.modal = opts.kind || 'info';
-    $('#modal-root').innerHTML = `<div class="overlay ${opts.locked ? 'locked' : ''}" data-act="${opts.locked ? '' : 'close-modal-bg'}"><div class="modal ${opts.cls || ''}">${opts.locked ? '' : '<button class="x" data-act="close-modal" aria-label="Закрыть">×</button>'}${html}</div></div>`;
+    $('#modal-root').innerHTML = `<div class="overlay ${opts.locked ? 'locked' : ''} ${opts.sheet ? 'sheet' : ''}" ${opts.locked ? '' : 'data-act="close-modal-bg"'}><div class="modal ${opts.cls || ''}">${opts.locked ? '' : '<button class="x" data-act="close-modal" aria-label="Закрыть">×</button>'}${html}</div></div>`;
   }
   function closeModal() { S.modal = null; $('#modal-root').innerHTML = ''; }
   function confirmBox(text, okLabel, onOk, danger) {
     openModal(`<h3>${text}</h3><div class="m-actions"><button class="btn" data-act="close-modal">Отмена</button><button class="btn ${danger ? 'danger' : 'primary'}" id="m-ok">${okLabel}</button></div>`, { kind: 'confirm' });
     $('#m-ok').onclick = () => { closeModal(); onOk(); };
   }
-
   function beep() {
     if (!S.sound) return;
     try {
       const ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
       const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(660, ctx.currentTime); o.frequency.exponentialRampToValueAtTime(990, ctx.currentTime + 0.15);
-      g.gain.setValueAtTime(0.12, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.36);
+      o.type = 'sine'; o.frequency.setValueAtTime(620, ctx.currentTime); o.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
+      g.gain.setValueAtTime(0.08, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.31);
     } catch {}
+  }
+
+  // ───────────────── правила ─────────────────
+  function rulesShortHTML() {
+    return `<ol class="short-rules">
+      <li><b>Цель</b> — довести влияние (здоровье) всех соперников до нуля.</li>
+      <li><b>Сыграйте карты из руки.</b> Они дают ${I.trade} торговлю, ${I.combat} урон и ${I.auth} влияние.</li>
+      <li><b>Купите карты</b> из торгового ряда за торговлю. Покупки уходят в ваш сброс и попадут в руку позже.</li>
+      <li><b>Атакуйте</b> уроном соперника или его базы. Пока у соперника есть <b>аванпост</b>, сначала бейте его.</li>
+      <li><b>Завершите ход</b> — вы возьмёте 5 новых карт. Несыгранная торговля и урон сгорают.</li>
+      <li><b>Союз</b> — бонус, если в ход сыграно 2+ карты одной фракции. <b>Утиль</b> — убрать карту из игры ради эффекта.</li>
+    </ol>`;
+  }
+  function showRules() {
+    openModal(`<div class="rules"><h2>Правила</h2>${rulesShortHTML()}
+      <h4>Подробнее</h4>
+      <p>У каждого колода из 10 карт: 8 «Курьеров» (+1 торговли) и 2 «Перехватчика» (+1 урона). Первый игрок начинает с 3 картами, второй — с 5 (в игре на троих и больше: 3, 4, затем по 5). Когда колода кончается, сброс перемешивается в новую колоду.</p>
+      <p><b>Корабли</b> действуют один ход и уходят в сброс. <b>Базы</b> остаются на столе и действуют каждый ваш ход; простые эффекты баз срабатывают сами, а если нужно выбирать — нажмите «Использовать». Чтобы уничтожить базу, потратьте урон, равный её защите (число в щите). Тёмный щит — <b>аванпост</b>: он защищает владельца и его остальные базы.</p>
+      <h4>Фракции</h4>
+      <div class="fac-list">
+        <div>${emblem('blob')} <b>Рой</b> — много урона, чистит торговый ряд.</div>
+        <div>${emblem('trade')} <b>Торговая Лига</b> — торговля и восстановление влияния.</div>
+        <div>${emblem('empire')} <b>Корона</b> — добор карт и сброс карт у соперников.</div>
+        <div>${emblem('machine')} <b>Машинный Орден</b> — утилизация слабых карт, прочные аванпосты.</div>
+      </div>
+      <p class="muted">${isTouch ? 'Нажмите на любую карту, чтобы прочитать, что она делает.' : 'Наведите курсор на карту, чтобы прочитать, что она делает.'}</p></div>`, { kind: 'rules', cls: 'wide' });
+  }
+  function showTutorial() {
+    openModal(`<div class="rules"><h2>Как сделать ход</h2>${rulesShortHTML()}
+      <p class="muted">Внизу экрана всегда есть подсказка, что делать дальше. ${isTouch ? 'Нажмите карту в руке — она сыграется. Нажмите любую другую карту — откроется её описание.' : 'Щелчок по карте в руке — сыграть её, по карте в ряду — купить. Наведите курсор на карту, чтобы прочитать описание.'}</p>
+      <div class="m-actions"><button class="btn primary" data-act="tutorial-ok">Понятно, играем</button></div></div>`, { kind: 'tutorial', cls: 'wide' });
   }
 
   // ───────────────── экраны ─────────────────
@@ -186,36 +286,33 @@
     return renderGame();
   }
 
-  // ── главная ──
   function renderHome() {
     const app = $('#app');
     if (S.screen !== 'home') {
       S.screen = 'home';
-      const sample = ['b_mother', 't_flagship', 'e_dread', 'm_brain'];
+      const sample = ['t_flagship', 'e_dread', 'b_mother'];
       app.innerHTML = `<div class="home">
         <div class="hero">
-          <div class="logo">Звёздные<br>Державы</div>
-          <p class="tag">Космическая колодостроительная битва · онлайн · 2–6 игроков</p>
-          <div class="hero-cards">${sample.map((cid, i) => cardHTML({ cid }, { size: 'md', cls: 'fan fan' + i })).join('')}</div>
+          <div class="logo">Звёздные Державы</div>
+          <p class="tag">Колодостроительная космическая стратегия для 2–6 игроков. Играйте с друзьями прямо в браузере — достаточно отправить ссылку.</p>
+          <div class="hero-cards">${sample.map((cid) => cardHTML({ cid }, { size: 'md' })).join('')}</div>
         </div>
         <div class="panel home-panel">
           <label class="fld">Ваше имя<input id="h-name" maxlength="20" autocomplete="nickname" placeholder="Например, Адмирал" value="${esc(S.name)}"></label>
           <button class="btn primary big" data-act="create">Создать стол</button>
           <div class="join-row"><input id="h-code" maxlength="4" placeholder="Код стола" autocapitalize="characters" value="${esc(S.pendingJoin)}"><button class="btn" data-act="join">Войти</button></div>
-          <h3>Открытые столы</h3>
+          <div class="sec-title">Открытые столы</div>
           <div id="h-rooms" class="room-list"></div>
-          <button class="btn ghost" data-act="rules">Как играть</button>
+          <button class="btn ghost" data-act="rules">Правила игры</button>
         </div>
       </div>`;
       $('#h-name').addEventListener('input', (e) => { S.name = e.target.value.trim(); store.set('sd_name', S.name); });
       $('#h-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(e.target.value); });
     }
-    const list = $('#h-rooms');
-    list.innerHTML = S.rooms.length
+    $('#h-rooms').innerHTML = S.rooms.length
       ? S.rooms.map((r) => `<button class="room-item" data-act="join-code" data-code="${r.code}"><b>${esc(r.host)}</b><span>${r.count}/${r.max} игроков · влияние ${r.authority}</span><i>${r.code}</i></button>`).join('')
-      : '<div class="empty">Пока никого. Создайте стол и отправьте друзьям ссылку.</div>';
+      : '<div class="empty">Открытых столов нет. Создайте свой и отправьте друзьям ссылку.</div>';
   }
-
   function needName() {
     const inp = $('#h-name');
     if (inp) S.name = inp.value.trim();
@@ -230,84 +327,131 @@
     send({ t: 'join', code, name: S.name });
   }
 
-  // ── лобби ──
   function renderLobby() {
     const r = S.room;
     const host = r.hostId === S.pid;
     const app = $('#app');
     if (S.screen !== 'lobby') {
       S.screen = 'lobby';
-      app.innerHTML = `<div class="lobby"><div class="panel lobby-panel">
-        <div class="l-head"><div><div class="l-sub">Стол</div><div class="l-code" id="l-code"></div></div>
-          <button class="btn" data-act="copy-link">Скопировать приглашение</button></div>
-        <div class="l-grid">
-          <div><h3 id="l-ptitle">Игроки</h3><div id="l-players" class="l-players"></div></div>
-          <div><h3>Настройки партии</h3><div id="l-settings"></div></div>
+      app.innerHTML = `<div class="lobby"><div class="lobby-grid">
+        <div class="panel">
+          <div class="l-head"><div><div class="sec-title">Стол</div><div class="l-code" id="l-code"></div></div>
+            <button class="btn" data-act="copy-link">Скопировать приглашение</button></div>
+          <div class="sec-title" id="l-ptitle">Игроки</div><div id="l-players" class="l-players"></div>
+          <div class="sec-title">Настройки партии</div><div id="l-settings"></div>
+          <div class="l-actions"><button class="btn ghost" data-act="leave">Выйти</button><span id="l-start"></span></div>
         </div>
-        <div class="l-chat"><div id="l-chatlog" class="chatlog"></div><form id="l-chatform" class="chatform"><input maxlength="200" placeholder="Сообщение…"><button class="btn">→</button></form></div>
-        <div class="l-actions"><button class="btn ghost" data-act="leave">Выйти</button><button class="btn ghost" data-act="rules">Правила</button><span id="l-start"></span></div>
+        <div class="panel">
+          <div class="sec-title">Коротко о правилах</div>${rulesShortHTML()}
+          <button class="btn ghost sm" data-act="rules">Подробные правила</button>
+          <div class="sec-title">Чат стола</div>
+          <div id="l-chatlog" class="chatlog"></div><form id="l-chatform" class="chatform"><input maxlength="200" placeholder="Сообщение…"><button class="btn">Отправить</button></form>
+        </div>
       </div></div>`;
       $('#l-chatform').addEventListener('submit', (e) => { e.preventDefault(); const i = e.target.querySelector('input'); if (i.value.trim()) send({ t: 'chat', text: i.value }); i.value = ''; });
     }
     $('#l-code').textContent = r.code;
-    $('#l-ptitle').textContent = `Игроки (${r.members.length}/${r.settings.maxPlayers})`;
+    $('#l-ptitle').textContent = `Игроки — ${r.members.length} из ${r.settings.maxPlayers}`;
     $('#l-players').innerHTML = r.members.map((m, i) => `<div class="l-player">
         <span class="avatar" style="--pc:${PCOLORS[i % 6]}">${esc((m.name || '?')[0].toUpperCase())}</span>
         <span class="nm">${esc(m.name)}${m.id === S.pid ? ' <small>(вы)</small>' : ''}</span>
-        ${m.id === r.hostId ? '<span class="chip gold">хост</span>' : ''}
-        ${!m.connected ? '<span class="chip">не в сети</span>' : ''}
+        ${m.id === r.hostId ? '<span class="tag-s">хост</span>' : ''}
+        ${!m.connected ? '<span class="tag-s muted">не в сети</span>' : ''}
         ${host && m.id !== S.pid ? `<button class="lnk" data-act="kick" data-pid="${m.id}">убрать</button>` : ''}
-      </div>`).join('') + (r.members.length < r.settings.maxPlayers ? '<div class="l-player empty-seat">Свободное место…</div>' : '');
+      </div>`).join('') + (r.members.length < r.settings.maxPlayers ? '<div class="l-player empty-seat">Свободное место</div>' : '');
 
     const st = r.settings;
-    const chips = (k, vals, cur, fmt = (v) => v) => vals.map((v) => `<button class="chip-btn ${cur === v ? 'on' : ''}" ${host ? `data-act="set" data-k="${k}" data-v="${v}"` : 'disabled'}>${fmt(v)}</button>`).join('');
+    const chips = (k, vals, cur, fmt = (v) => v) => vals.map((v) => `<button class="seg ${cur === v ? 'on' : ''}" ${host ? `data-act="set" data-k="${k}" data-v="${v}"` : 'disabled'}>${fmt(v)}</button>`).join('');
     const sEl = $('#l-settings');
-    // пока хост печатает своё число влияния, поле не трогаем — обновляем только подсветку кнопок
     const typing = document.activeElement && document.activeElement.id === 'l-auth';
     if (typing) {
-      sEl.querySelectorAll('.chip-btn[data-k]').forEach((b) => b.classList.toggle('on', String(st[b.dataset.k]) === b.dataset.v));
+      $$('.seg[data-k]', sEl).forEach((b) => b.classList.toggle('on', String(st[b.dataset.k]) === b.dataset.v));
     } else {
       sEl.innerHTML = `
         <div class="set"><div class="set-l">Стартовое влияние (здоровье)</div>
-          <div class="chips">${chips('authority', [20, 30, 40, 50, 75, 100], st.authority)}</div>
-          ${host ? `<label class="custom">или своё: <input id="l-auth" type="number" min="1" max="999" value="${st.authority}"></label>` : `<div class="big-val">${st.authority}</div>`}
+          <div class="segs">${chips('authority', [20, 30, 40, 50, 75, 100], st.authority)}</div>
+          ${host ? `<label class="custom">Своё значение <input id="l-auth" type="number" min="1" max="999" value="${st.authority}"></label>` : ''}
         </div>
-        <div class="set"><div class="set-l">Мест за столом</div><div class="chips">${chips('maxPlayers', [2, 3, 4, 5, 6], st.maxPlayers)}</div></div>
-        <div class="set"><div class="set-l">Кто ходит первым</div><div class="chips">${chips('randomOrder', [true, false], st.randomOrder, (v) => (v ? 'Случайно' : 'По порядку входа'))}</div></div>
-        ${host ? '' : '<p class="hint">Настройки выбирает хост.</p>'}`;
+        <div class="set"><div class="set-l">Мест за столом</div><div class="segs">${chips('maxPlayers', [2, 3, 4, 5, 6], st.maxPlayers)}</div></div>
+        <div class="set"><div class="set-l">Первый ход</div><div class="segs">${chips('randomOrder', [true, false], st.randomOrder, (v) => (v ? 'Случайно' : 'По порядку входа'))}</div></div>
+        ${host ? '' : '<p class="muted">Настройки выбирает хост.</p>'}`;
       const ai = $('#l-auth');
       if (ai) ai.addEventListener('change', () => send({ t: 'settings', settings: { ...S.room.settings, authority: ai.value } }));
     }
     $('#l-start').innerHTML = host
       ? `<button class="btn primary big" data-act="start" ${r.members.length < 2 ? 'disabled' : ''}>${r.members.length < 2 ? 'Ждём игроков…' : 'Начать игру'}</button>`
-      : '<span class="hint">Ждём, когда хост начнёт игру…</span>';
+      : '<span class="muted">Ждём, когда хост начнёт игру…</span>';
     renderChat($('#l-chatlog'));
   }
 
   function renderChat(el) {
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    el.innerHTML = S.room.chat.map((c) => (c.sys ? `<div class="msg sys">${esc(c.text)}</div>` : `<div class="msg"><b>${esc(c.name)}:</b> ${esc(c.text)}</div>`)).join('') || '<div class="msg sys">Здесь можно переписываться</div>';
+    el.innerHTML = S.room.chat.map((c) => (c.sys ? `<div class="msg sys">${esc(c.text)}</div>` : `<div class="msg"><b>${esc(c.name)}:</b> ${esc(c.text)}</div>`)).join('') || '<div class="msg sys">Сообщений пока нет</div>';
     if (atBottom) el.scrollTop = el.scrollHeight;
   }
 
-  // ── игра ──
-  function renderGame() {
+  // ───────────────── игра ─────────────────
+  function ctx() {
     const r = S.room, g = r.game;
+    const me = g.players.find((p) => p.id === S.pid);
+    const cur = g.players.find((p) => p.id === g.turn);
+    const myTurn = !!me && g.turn === S.pid && !g.over;
+    const blocked = !!g.prompt;
+    const colorOf = (pid) => PCOLORS[g.players.findIndex((p) => p.id === pid) % 6];
+    const hasOutpost = (p) => p.bases.some((b) => CARDS[b.cid].outpost);
+    return { r, g, me, cur, myTurn, blocked, colorOf, hasOutpost, host: r.hostId === S.pid };
+  }
+
+  function canAttackBase(C, owner, b) {
+    const d = CARDS[b.cid];
+    if (!C.myTurn || C.blocked || !owner.alive || owner.id === S.pid) return false;
+    if (!d.outpost && C.hasOutpost(owner)) return false;
+    return C.g.pool.combat >= d.defense;
+  }
+
+  // подсказка «что делать сейчас»
+  function coach(C) {
+    const { g, me, cur, myTurn } = C;
+    if (g.over) return { text: 'Партия окончена.', cue: '' };
+    if (!me || !me.alive) return { text: 'Вы наблюдаете за партией.', cue: '' };
+    if (!myTurn) return { text: `Сейчас ходит ${esc(cur.name)}. ${isTouch ? 'Нажмите на карту, чтобы прочитать её описание.' : 'Наведите курсор на карту, чтобы прочитать описание.'}`, cue: '' };
+    if (g.prompt) return { text: 'Сделайте выбор в открытом окне.', cue: '' };
+    if (me.hand.length) return { text: `<b>Шаг 1.</b> Сыграйте карты из руки — ${isTouch ? 'нажмите на карту' : 'щёлкните по карте'} или «Сыграть все».`, cue: 'hand' };
+    const manual = me.bases.filter((b) => CARDS[b.cid].primary.length && !(b.used && b.used.primary));
+    if (manual.length) return { text: `Используйте базу «${esc(CARDS[manual[0].cid].name)}» — кнопка «Использовать» на карте.`, cue: 'bases' };
+    const affordable = g.row.some((c) => c && CARDS[c.cid].cost <= g.pool.trade) || (g.explorers > 0 && g.pool.trade >= 2);
+    if (affordable) return { text: `<b>Шаг 2.</b> У вас ${g.pool.trade} торговли — купите карту из ряда (подсвечены). Купленное попадёт в ваш сброс.`, cue: 'market' };
+    if (g.pool.combat > 0) {
+      const ops = g.players.filter((p) => p.alive && p.id !== S.pid);
+      const blockedByOut = ops.length && ops.every((p) => C.hasOutpost(p));
+      if (blockedByOut) {
+        const can = ops.some((p) => p.bases.some((b) => canAttackBase(C, p, b)));
+        if (can) return { text: `<b>Шаг 3.</b> У вас ${g.pool.combat} урона. Соперников защищают аванпосты — сначала уничтожьте аванпост${isMobile() ? ' (нажмите на соперника вверху)' : ' (он подсвечен красным)'}.`, cue: 'opps' };
+      } else return { text: `<b>Шаг 3.</b> У вас ${g.pool.combat} урона — ${isMobile() ? 'нажмите на соперника вверху и «Атаковать»' : 'нажмите «Атаковать» у соперника'}${ops.length > 1 ? ' (урон можно разделить)' : ''}.`, cue: 'opps' };
+    }
+    return { text: '<b>Шаг 4.</b> Больше делать нечего — нажмите «Завершить ход».', cue: 'end' };
+  }
+
+  function renderGame() {
+    const C = ctx();
+    const { r, g, me, cur, myTurn, blocked, colorOf, host } = C;
+    const mobile = isMobile();
     const app = $('#app');
     if (S.screen !== 'game') {
       S.screen = 'game';
       S.prevAuth = {};
+      S.chatSeenUser = undefined;
       app.innerHTML = `<div class="game">
         <div id="board" class="board"></div>
         <aside id="side" class="side">
-          <div class="tabs"><button data-act="tab" data-tab="log" class="on">Журнал</button><button data-act="tab" data-tab="chat">Чат <span id="unread" class="unread hidden"></span></button><button class="side-close" data-act="toggle-side">×</button></div>
+          <div id="side-opps" class="side-opps"></div>
+          <div class="tabs"><button data-act="tab" data-tab="log" class="on">Журнал</button><button data-act="tab" data-tab="chat">Чат <span id="unread" class="unread hidden"></span></button><button class="side-close" data-act="toggle-side" aria-label="Закрыть">×</button></div>
           <div id="side-log" class="log"></div>
           <div id="side-chat" class="side-chat hidden"><div id="chatlog" class="chatlog"></div><form id="chatform" class="chatform"><input maxlength="200" placeholder="Сообщение…"><button class="btn">→</button></form></div>
         </aside>
       </div>`;
       $('#chatform').addEventListener('submit', (e) => { e.preventDefault(); const i = e.target.querySelector('input'); if (i.value.trim()) send({ t: 'chat', text: i.value }); i.value = ''; });
-      S.chatSeenUser = undefined;
     }
     zoom.classList.add('hidden');
 
@@ -316,156 +460,132 @@
     if (S.side === 'chat' && (S.sideOpen || matchMedia('(min-width: 1100px)').matches)) S.chatSeenUser = userMsgs;
     S.unread = Math.max(0, userMsgs - S.chatSeenUser);
 
-    const me = g.players.find((p) => p.id === S.pid);
-    const cur = g.players.find((p) => p.id === g.turn);
-    const myTurn = !!me && g.turn === S.pid && !g.over;
-    const colorOf = (pid) => PCOLORS[g.players.findIndex((p) => p.id === pid) % 6];
-    const member = (pid) => r.members.find((m) => m.id === pid);
-    const host = r.hostId === S.pid;
-
-    // соперники по кругу, начиная со следующего за мной
-    let opps = g.players.filter((p) => p.id !== S.pid);
-    if (me) { const i = g.players.indexOf(me); opps = [...g.players.slice(i + 1), ...g.players.slice(0, i)]; }
-
-    const outpostsOf = (p) => p.bases.some((b) => CARDS[b.cid].outpost);
-    const combat = g.pool.combat, trade = g.pool.trade;
-    const blocked = !!g.prompt;
-
-    // уведомление о начале своего хода
     if (myTurn && !S.wasMyTurn) { beep(); flashTurn(); }
     S.wasMyTurn = myTurn;
-    document.title = myTurn ? '★ Ваш ход — Звёздные Державы' : 'Звёздные Державы — онлайн';
+    document.title = myTurn ? '● Ваш ход — Звёздные Державы' : 'Звёздные Державы';
 
+    let opps = g.players.filter((p) => p.id !== S.pid);
+    if (me) { const i = g.players.indexOf(me); opps = [...g.players.slice(i + 1), ...g.players.slice(0, i)]; }
+    const tip = coach(C);
+    const combat = g.pool.combat, trade = g.pool.trade;
+
+    // соперники
     const oppHTML = opps.map((p) => {
-      const hasOut = outpostsOf(p);
-      const m = member(p.id);
+      const m = r.members.find((x) => x.id === p.id);
       const hit = S.prevAuth[p.id] !== undefined && p.authority < S.prevAuth[p.id];
-      const canAtk = myTurn && !blocked && p.alive && combat > 0 && !hasOut;
+      const canAtk = myTurn && !blocked && p.alive && combat > 0 && !C.hasOutpost(p);
+      const anyBaseTarget = p.bases.some((b) => canAttackBase(C, p, b));
+      const offline = m && !m.connected;
+      if (mobile) {
+        return `<button class="opp-chip ${p.id === g.turn ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''} ${canAtk || anyBaseTarget ? 'target' : ''}" style="--pc:${colorOf(p.id)}" data-act="opp-sheet" data-pid="${p.id}">
+          <span class="avatar">${esc(p.name[0].toUpperCase())}</span>
+          <span class="oc-body"><span class="oc-name">${esc(p.name)}${offline ? ' · офлайн' : ''}</span>
+          <span class="oc-meta">${p.alive ? `<span class="hp ${p.authority <= 10 ? 'low' : ''}">${I.auth}${Math.max(0, p.authority)}</span><span>баз ${p.bases.length}${C.hasOutpost(p) ? ' 🛡' : ''}</span><span>✋${p.handCount}</span>` : 'выбыл'}</span></span>
+          ${canAtk || anyBaseTarget ? '<span class="oc-atk">⚔</span>' : ''}
+        </button>`;
+      }
       const bases = p.bases.map((b) => {
-        const d = CARDS[b.cid];
-        const allowed = myTurn && !blocked && p.alive && (d.outpost || !hasOut);
-        const can = allowed && combat >= d.defense;
-        return cardHTML(b, {
-          size: 'xs',
-          cls: (can ? 'targetable' : '') + (allowed && !can ? ' target-weak' : ''),
-          attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}`,
-        });
+        const can = canAttackBase(C, p, b);
+        return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}` });
       }).join('');
       return `<div class="opp ${p.id === g.turn ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
-        <div class="opp-head">
-          <span class="avatar">${esc(p.name[0].toUpperCase())}</span>
-          <div class="opp-nm"><b>${esc(p.name)}</b>${p.id === r.hostId ? ' <span class="chip gold tiny">хост</span>' : ''}${m && !m.connected ? ' <span class="chip tiny">офлайн</span>' : ''}</div>
-          <div class="auth-badge ${p.authority <= 10 ? 'low' : ''}" title="Влияние">${Math.max(0, p.authority)}</div>
-        </div>
-        ${p.alive ? `<div class="opp-meta">
-          <span title="Карт в руке">✋ ${p.handCount}</span>
-          <span title="Карт в колоде">🂠 ${p.deckCount}</span>
-          <button class="lnk" data-act="view-discard" data-pid="${p.id}" title="Сброс">сброс ${p.discard.length}</button>
-          ${p.pendingDiscard ? `<span class="chip warn tiny">сбросит ${p.pendingDiscard}</span>` : ''}
-        </div>
-        <div class="opp-bases">${bases || '<span class="no-bases">нет баз</span>'}</div>
-        ${canAtk ? `<button class="btn atk" data-act="atkplayer" data-target="${p.id}">⚔ Атаковать</button>` : hasOut && myTurn && combat > 0 ? '<div class="hint small">Сначала аванпосты</div>' : ''}
-        ${host && m && !m.connected && !g.over ? `<button class="lnk danger" data-act="kick" data-pid="${p.id}">исключить</button>` : ''}`
-        : `<div class="dead-lbl">выбыл${p.place ? ` · ${p.place} место` : ''}</div>`}
+        <div class="opp-head"><span class="avatar">${esc(p.name[0].toUpperCase())}</span>
+          <div class="opp-nm"><b>${esc(p.name)}</b>${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
+          <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Влияние (здоровье)">${Math.max(0, p.authority)}</div></div>
+        ${p.alive ? `<div class="opp-meta"><span title="Карт в руке">рука ${p.handCount}</span><span title="Карт в колоде">колода ${p.deckCount}</span>
+          <button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>
+          ${p.pendingDiscard ? `<span class="tag-s warn">сбросит ${p.pendingDiscard}</span>` : ''}</div>
+          <div class="opp-bases">${bases || '<span class="none">нет баз</span>'}</div>
+          ${canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${p.id}">Атаковать</button>` : C.hasOutpost(p) && myTurn && combat > 0 ? '<div class="muted small">Защищён аванпостом</div>' : ''}
+          ${host && offline && !g.over ? `<button class="lnk danger" data-act="kick" data-pid="${p.id}">исключить</button>` : ''}`
+        : `<div class="muted">выбыл${p.place ? ` · ${p.place} место` : ''}</div>`}
       </div>`;
     }).join('');
 
-    // рынок
+    // торговый ряд
+    const cs = mobile ? 'mini' : 'md';
     const rowHTML = g.row.map((c, i) => {
-      if (!c) return '<div class="card md slot-empty"></div>';
-      const d = CARDS[c.cid];
-      const can = myTurn && !blocked && trade >= d.cost;
-      return cardHTML(c, { size: 'md', cls: can ? 'can-buy' : '', attrs: `data-zone="row" data-slot="${i}" ${can && !isTouch ? 'data-act="buy"' : ''}` });
+      if (!c) return `<div class="card ${cs} slot-empty"></div>`;
+      const can = myTurn && !blocked && trade >= CARDS[c.cid].cost;
+      return cardHTML(c, { size: cs, cls: can ? 'can-buy' : '', attrs: `data-zone="row" data-slot="${i}" ${can && !isTouch ? 'data-act="buy"' : ''}` });
     }).join('');
     const canExp = myTurn && !blocked && trade >= 2 && g.explorers > 0;
     const expHTML = g.explorers > 0
-      ? cardHTML({ cid: 'explorer' }, { size: 'md', cls: 'pile-card ' + (canExp ? 'can-buy' : ''), attrs: `data-zone="row" data-slot="explorer" ${canExp && !isTouch ? 'data-act="buy"' : ''}`, badge: `<div class="pile-count">${g.explorers}</div>` })
-      : '<div class="card md slot-empty"><span>Старатели закончились</span></div>';
+      ? cardHTML({ cid: 'explorer' }, { size: cs, cls: 'pile-card ' + (canExp ? 'can-buy' : ''), attrs: `data-zone="row" data-slot="explorer" ${canExp && !isTouch ? 'data-act="buy"' : ''}`, badge: `<span class="pile-count">×${g.explorers}</span>` })
+      : '';
 
-    // поле хода
+    // сыгранное
     const isMe = cur && cur.id === S.pid;
-    const playHTML = cur ? cur.inPlay.map((c) => {
+    const ps = mobile ? 'mini' : 'sm';
+    const playHTML = cur.inPlay.map((c) => {
       const d = CARDS[c.copied || c.cid];
-      const acts = isMe && myTurn && !blocked && d.scrap.length ? `<button class="mini-btn scrap" data-act="scrap" data-uid="${c.uid}" title="Утилизировать">${TRASH_SM} Утиль</button>` : '';
-      return cardHTML(c, { size: 'sm', actions: acts, attrs: 'data-zone="play"' });
-    }).join('') : '';
+      const acts = isMe && myTurn && !blocked && d.scrap.length ? `<button class="mini-btn" data-act="scrap" data-uid="${c.uid}">Утилизировать</button>` : '';
+      return cardHTML(c, { size: ps, actions: acts, attrs: 'data-zone="play"' });
+    }).join('');
 
     // моя зона
-    let meHTML = '';
+    let mineHTML = '', basesZone = '';
     if (me) {
       const bases = me.bases.map((b) => {
-        const d = CARDS[b.cid];
-        const used = b.used || {};
+        const d = CARDS[b.cid]; const used = b.used || {};
         let acts = '';
         if (myTurn && !blocked) {
           if (d.primary.length && !used.primary) acts += `<button class="mini-btn use" data-act="activate" data-uid="${b.uid}">Использовать</button>`;
-          if (d.scrap.length) acts += `<button class="mini-btn scrap" data-act="scrap" data-uid="${b.uid}" title="Утилизировать">${TRASH_SM} Утиль</button>`;
+          if (d.scrap.length) acts += `<button class="mini-btn" data-act="scrap" data-uid="${b.uid}">Утилизировать</button>`;
         }
-        return cardHTML(b, { size: 'sm', actions: acts, manual: true, attrs: 'data-zone="mybase"' });
+        return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"' });
       }).join('');
-      const hand = (me.hand || []).map((c) => cardHTML(c, { size: 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
+      const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
       const top = me.discard[me.discard.length - 1];
-      meHTML = `<section class="me ${myTurn ? 'my-turn' : ''}" style="--pc:${colorOf(me.id)}">
-        <div class="me-side">
-          <div class="me-auth ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}"><small>Влияние</small><b>${Math.max(0, me.authority)}</b></div>
-          <div class="me-piles">
-            ${backHTML('Колода', me.deckCount, 'xs')}
-            <div class="discard-pile" data-act="view-discard" data-pid="${me.id}">${top ? cardHTML(top, { size: 'xs' }) : '<div class="card xs slot-empty"></div>'}<div class="pile-count">${me.discard.length}</div><div class="pile-label">Сброс</div></div>
+      basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''}"><div class="zl">Ваши базы</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
+      mineHTML = `
+        <div class="hint ${myTurn ? 'mine' : ''}">${tip.text}</div>
+        <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
+        <section class="actionbar ${myTurn ? 'my-turn' : ''}" style="--pc:${colorOf(me.id)}">
+          <div class="stats">
+            <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="Ваше влияние (здоровье)">${I.auth}<b>${Math.max(0, me.authority)}</b><small>влияние</small></div>
+            <div class="stat" title="Торговля на этот ход">${I.trade}<b>${myTurn ? trade : 0}</b><small>торговля</small></div>
+            <div class="stat" title="Урон на этот ход">${I.combat}<b>${myTurn ? combat : 0}</b><small>урон</small></div>
+            <button class="stat pile" data-act="view-deck" title="Колода">${I.draw}<b>${me.deckCount}</b><small>колода</small></button>
+            <button class="stat pile" data-act="view-discard" data-pid="${me.id}" title="Сброс">${top ? '▤' : '▢'}<b>${me.discard.length}</b><small>сброс</small></button>
           </div>
-        </div>
-        <div class="me-main">
-          <div class="zone-label">${me.alive ? 'Ваши базы' : 'Вы выбыли'}</div>
-          <div class="me-bases">${bases || '<span class="no-bases">Базы появятся здесь</span>'}</div>
-          <div class="zone-label">Рука ${me.pendingDiscard ? `<span class="chip warn tiny">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div>
-          <div class="hand">${hand || '<span class="no-bases">Рука пуста</span>'}</div>
-        </div>
-        <div class="me-actions">
-          <div class="pools"><div class="pool"><span class="ic ic-trade big"><b>${myTurn ? trade : 0}</b></span><small>Торговля</small></div><div class="pool"><span class="ic ic-combat big"><b>${myTurn ? combat : 0}</b></span><small>Урон</small></div></div>
-          ${myTurn ? `<button class="btn" data-act="playall" ${blocked || !me.hand.length ? 'disabled' : ''}>Сыграть все карты</button>
-            <button class="btn primary big" data-act="endturn" ${blocked ? 'disabled' : ''}>Завершить ход</button>`
-            : g.over ? '<button class="btn primary" data-act="show-go">Итоги партии</button>'
-            : `<div class="wait">Ходит<br><b style="color:${colorOf(g.turn)}">${esc(cur.name)}</b></div>`}
-        </div>
-      </section>`;
+          <div class="acts">
+            ${myTurn ? `<button class="btn" data-act="playall" ${blocked || !me.hand.length ? 'disabled' : ''}>Сыграть все</button>
+              <button class="btn primary ${tip.cue === 'end' ? 'cue-btn' : ''}" data-act="endturn" ${blocked ? 'disabled' : ''}>Завершить ход</button>`
+              : g.over ? '<button class="btn primary" data-act="show-go">Итоги партии</button>'
+              : `<span class="wait">Ходит <b style="color:${colorOf(g.turn)}">${esc(cur.name)}</b></span>`}
+          </div>
+        </section>`;
     } else {
-      meHTML = '<section class="me"><div class="wait">Вы наблюдаете за партией</div></section>';
+      mineHTML = '<div class="hint">Вы наблюдаете за партией.</div>';
     }
 
     const turnLbl = g.over ? 'Партия окончена' : myTurn ? 'Ваш ход' : `Ходит ${esc(cur.name)}`;
     $('#board').innerHTML = `
-      <header class="g-top">
-        <div class="g-title">Звёздные Державы <span class="g-code">стол ${r.code}</span></div>
-        <div class="g-turn ${myTurn ? 'mine' : ''}" style="--pc:${colorOf(g.turn)}">${turnLbl}</div>
-        <div class="g-btns">
+      <header class="topbar">
+        <div class="brand">Звёздные Державы <span>стол ${r.code}</span></div>
+        <div class="turn-pill ${myTurn ? 'mine' : ''}" style="--pc:${colorOf(g.turn)}">${turnLbl}</div>
+        <div class="tb-btns">
           <button class="btn sm ghost" data-act="rules">Правила</button>
           <button class="btn sm ghost" data-act="menu">Меню</button>
           <button class="btn sm ghost side-toggle" data-act="toggle-side">Журнал${S.unread ? ` <span class="unread">${S.unread}</span>` : ''}</button>
         </div>
       </header>
-      <section class="opps cnt-${opps.length}">${oppHTML}</section>
-      <section class="center">
-        <div class="market">
-          <div class="market-label">Торговый ряд</div>
-          <div class="market-row">
-            ${backHTML('Торговая колода', g.tradeDeckCount, 'md', 'data-zone="tradedeck"')}
-            <div class="row-cards">${rowHTML}</div>
-            ${expHTML}
-          </div>
-        </div>
-        <div class="playzone" style="--pc:${colorOf(g.turn)}">
-          <div class="pz-head"><span>${isMe ? 'Вы сыграли' : `Сыграно: <b>${esc(cur.name)}</b>`}</span>
-            <span class="pz-pools">${IC.trade(trade)} ${IC.combat(combat)}</span>
-            ${g.topNext ? '<span class="chip tiny">следующий корабль → на верх колоды</span>' : ''}</div>
-          <div class="pz-cards">${playHTML || '<span class="no-bases">Пока ничего не сыграно</span>'}</div>
-        </div>
+      ${mqWide.matches ? '' : `<section class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}</section>`}
+      <section class="zone market ${tip.cue === 'market' ? 'cue' : ''}">
+        <div class="zl">Торговый ряд <span class="muted">· в колоде ${g.tradeDeckCount}</span></div>
+        <div class="strip">${rowHTML}${expHTML}</div>
       </section>
-      ${meHTML}
-      ${g.prompt && g.prompt.waiting ? `<div class="waiting-banner">${esc(g.prompt.text)}</div>` : ''}
-    `;
+      <div class="table-row"><section class="zone play-zone" style="--pc:${colorOf(g.turn)}">
+        <div class="zl">${isMe ? 'Вы сыграли' : `Сыграно: ${esc(cur.name)}`} ${!isMe ? `<span class="muted">· торговля ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
+        <div class="strip">${playHTML || '<span class="none">Пока ничего</span>'}</div>
+      </section>${basesZone}</div>
+      ${mineHTML}
+      ${g.prompt && g.prompt.waiting ? `<div class="waiting-banner">${esc(g.prompt.text)}</div>` : ''}`;
 
     S.prevAuth = Object.fromEntries(g.players.map((p) => [p.id, p.authority]));
+    $('#side-opps').innerHTML = mqWide.matches ? `<div class="zl">Соперники</div><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}</div>` : '';
 
-    // журнал и чат
     const logEl = $('#side-log');
     logEl.innerHTML = g.log.map((l) => `<div class="le ${l.kind || ''}">${esc(l.text)}</div>`).join('');
     logEl.scrollTop = logEl.scrollHeight;
@@ -473,20 +593,25 @@
     const ur = $('#unread');
     if (ur) { ur.textContent = S.unread; ur.classList.toggle('hidden', !S.unread); }
 
-    // окна выбора
+    // окна
     if (g.prompt && !g.prompt.waiting && myTurn) renderPrompt(g);
     else if (S.modal === 'prompt') closeModal();
 
+    if (!g.over && me && !S.tutorialShown && store.get('sd_tutorial') !== '1' && !S.modal) { S.tutorialShown = true; showTutorial(); }
+
     if (g.over) { if (!S.goShown) { S.goShown = true; renderGameOver(g, host); } }
     else { S.goShown = false; if (S.modal === 'gameover') closeModal(); }
+
+    // если открыт лист соперника — обновить
+    if (S.modal === 'opp' && S.oppSheet) oppSheet(S.oppSheet, true);
   }
 
   function flashTurn() {
     const el = document.createElement('div');
     el.className = 'turn-flash';
-    el.textContent = 'Ваш ход!';
+    el.textContent = 'Ваш ход';
     document.body.appendChild(el);
-    setTimeout(() => el.remove(), 1600);
+    setTimeout(() => el.remove(), 1400);
   }
 
   // ── выбор ──
@@ -496,71 +621,98 @@
     if (S.selKey !== key) { S.selKey = key; S.sel = []; }
     let body = '';
     if (pr.kind === 'choose') {
-      body = `<div class="choices">${pr.options.map((o, i) => `<button class="choice" data-act="choose" data-i="${i}">${abil(o)}</button>`).join('')}</div>`;
+      body = `<div class="choices">${pr.options.map((o, i) => `<button class="choice" data-act="choose" data-i="${i}">${o.map(effShort).join('')}</button>`).join('')}</div>`;
     } else if (pr.kind === 'opponent') {
-      body = `<div class="choices">${pr.options.map((id) => { const p = g.players.find((x) => x.id === id); return `<button class="choice" data-act="opp" data-target="${id}"><b>${esc(p.name)}</b><small>✋ ${p.handCount} · влияние ${p.authority}</small></button>`; }).join('')}</div>`;
+      body = `<div class="choices">${pr.options.map((id) => { const p = g.players.find((x) => x.id === id); return `<button class="choice" data-act="opp" data-target="${id}"><b>${esc(p.name)}</b><small>карт в руке ${p.handCount} · влияние ${p.authority}</small></button>`; }).join('')}</div>`;
     } else {
-      const zoneName = { hand: 'рука', discard: 'сброс', row: 'ряд', base: 'база', explorer: 'стопка', play: 'в игре' };
+      const zoneName = { hand: 'из руки', discard: 'из сброса', row: 'из ряда', base: 'база', explorer: 'стопка', play: 'в игре' };
       body = `<div class="pick-grid">${pr.cards.map((c) => {
         const owner = c.owner ? g.players.find((p) => p.id === c.owner) : null;
-        return `<div class="pick ${S.sel.includes(c.uid) ? 'sel' : ''}" data-act="pick" data-uid="${c.uid}">
-          ${cardHTML(c, { size: 'sm' })}<div class="pick-zone">${owner ? esc(owner.name) : zoneName[c.zone] || ''}</div></div>`;
+        return `<div class="pick ${S.sel.includes(c.uid) ? 'sel' : ''}" data-act="pick" data-uid="${c.uid}">${cardHTML(c, { size: 'sm' })}<div class="pick-zone">${owner ? esc(owner.name) : zoneName[c.zone] || ''}</div></div>`;
       }).join('')}</div>`;
       const min = Math.min(pr.min, pr.cards.length);
-      const ok = S.sel.length >= min && S.sel.length <= pr.max;
-      body += `<div class="m-actions">
-        ${pr.min === 0 ? '<button class="btn" data-act="pick-skip">Пропустить</button>' : ''}
+      const ok = S.sel.length >= min && S.sel.length <= pr.max && S.sel.length > 0;
+      body += `<div class="m-actions">${pr.min === 0 ? '<button class="btn" data-act="pick-skip">Пропустить</button>' : ''}
         <span class="sel-count">Выбрано ${S.sel.length} из ${pr.max}</span>
-        <button class="btn primary" data-act="pick-ok" ${ok && S.sel.length ? '' : 'disabled'}>Подтвердить</button></div>`;
+        <button class="btn primary" data-act="pick-ok" ${ok ? '' : 'disabled'}>Подтвердить</button></div>`;
     }
-    openModal(`<h3>${esc(pr.text)}</h3>${body}`, { kind: 'prompt', locked: true, cls: 'wide' });
+    openModal(`<h3>${esc(pr.text)}</h3>${body}`, { kind: 'prompt', locked: true, cls: 'wide', sheet: isMobile() });
   }
 
   function renderGameOver(g, host) {
-    if (S.modal === 'gameover') return;
     const ranked = [...g.players].sort((a, b) => (a.place || 99) - (b.place || 99));
     const win = g.players.find((p) => p.id === g.winner);
-    openModal(`<div class="go">
-      <div class="go-crown">🏆</div>
-      <h2>${win ? (win.id === S.pid ? 'Вы победили!' : `Победил ${esc(win.name)}`) : 'Партия окончена'}</h2>
-      <ol class="go-list">${ranked.map((p) => `<li><b>${esc(p.name)}</b> <span>${p.place ? p.place + ' место' : ''}</span></li>`).join('')}</ol>
-      <div class="m-actions">${host ? '<button class="btn primary big" data-act="tolobby">Новая партия</button>' : '<span class="hint">Хост может начать новую партию</span>'}
+    openModal(`<div class="go"><div class="sec-title">Партия окончена</div>
+      <h2>${win ? (win.id === S.pid ? 'Вы победили' : `Победил ${esc(win.name)}`) : 'Ничья'}</h2>
+      <ol class="go-list">${ranked.map((p) => `<li><b>${esc(p.name)}</b><span>${p.place ? p.place + ' место' : ''}</span></li>`).join('')}</ol>
+      <div class="m-actions center">${host ? '<button class="btn primary big" data-act="tolobby">Новая партия</button>' : '<span class="muted">Новую партию начинает хост</span>'}
       <button class="btn ghost" data-act="close-modal">Посмотреть стол</button><button class="btn ghost" data-act="leave">Выйти</button></div></div>`, { kind: 'gameover' });
   }
 
-  // ── просмотр карт ──
-  function cardModal(el) {
-    const g = S.room && S.room.game;
-    const cid = el.dataset.cid;
-    const zone = el.dataset.zone;
-    let actions = '';
-    if (g && g.turn === S.pid && !g.prompt && !g.over) {
-      if (zone === 'row') {
-        const slot = el.dataset.slot;
-        const cost = CARDS[cid].cost;
-        actions = `<button class="btn primary big" data-act="buy" data-slot="${slot}" ${g.pool.trade >= cost ? '' : 'disabled'}>Купить за ${cost}</button>`;
-      }
-      if (zone === 'oppbase' && el.dataset.act === 'atkbase') {
-        actions = `<button class="btn danger big" data-act="atkbase" data-target="${el.dataset.target}" data-uid="${el.dataset.uid}">Уничтожить (${CARDS[cid].defense} урона)</button>`;
-      }
+  // ── описание карты с действиями ──
+  function cardActions(el) {
+    const C = S.room && S.room.game ? ctx() : null;
+    if (!C || !C.myTurn || C.blocked) return '';
+    const zone = el.dataset.zone, uid = el.dataset.uid, cid = el.dataset.cid, d = CARDS[cid];
+    if (zone === 'hand') return `<button class="btn primary" data-act="play" data-uid="${uid}">Сыграть карту</button>`;
+    if (zone === 'row') {
+      const slot = el.dataset.slot;
+      return `<button class="btn primary" data-act="buy" data-slot="${slot}" ${C.g.pool.trade >= d.cost ? '' : 'disabled'}>Купить за ${d.cost}</button>${C.g.pool.trade < d.cost ? `<span class="muted small">У вас ${C.g.pool.trade} торговли</span>` : ''}`;
     }
-    openModal(`<div class="zoom-modal">${cardHTML({ cid }, { size: 'lg' })}</div>${actions ? `<div class="m-actions center">${actions}</div>` : ''}`, { kind: 'card', cls: 'card-modal' });
+    if (zone === 'oppbase') {
+      const owner = C.g.players.find((p) => p.id === el.dataset.owner);
+      const b = owner && owner.bases.find((x) => x.uid === uid);
+      if (b && canAttackBase(C, owner, b)) return `<button class="btn danger" data-act="atkbase" data-target="${owner.id}" data-uid="${uid}">Уничтожить за ${d.defense} урона</button>`;
+      return '';
+    }
+    if (zone === 'mybase') {
+      const b = C.me.bases.find((x) => x.uid === uid);
+      let a = '';
+      if (b && d.primary.length && !(b.used && b.used.primary)) a += `<button class="btn primary" data-act="activate" data-uid="${uid}">Использовать</button>`;
+      if (d.scrap.length) a += `<button class="btn" data-act="scrap" data-uid="${uid}">Утилизировать</button>`;
+      return a;
+    }
+    if (zone === 'play' && d.scrap.length && C.cur.id === S.pid) return `<button class="btn" data-act="scrap" data-uid="${uid}">Утилизировать</button>`;
+    return '';
+  }
+  function cardModal(el) {
+    const c = { cid: el.dataset.cid, uid: el.dataset.uid };
+    openModal(detailHTML(c, cardActions(el)), { kind: 'card', cls: 'detail-modal', sheet: isMobile() });
+  }
+
+  function oppSheet(pid, refresh) {
+    const C = ctx();
+    const p = C.g.players.find((x) => x.id === pid);
+    if (!p) return;
+    S.oppSheet = pid;
+    const canAtk = C.myTurn && !C.blocked && p.alive && C.g.pool.combat > 0 && !C.hasOutpost(p);
+    const bases = p.bases.map((b) => {
+      const can = canAttackBase(C, p, b);
+      return `<div class="ob">${cardHTML(b, { size: 'sm', attrs: `data-zone="oppbase" data-owner="${p.id}"` })}${can ? `<button class="btn danger sm" data-act="atkbase" data-target="${p.id}" data-uid="${b.uid}">Уничтожить (${CARDS[b.cid].defense})</button>` : ''}</div>`;
+    }).join('');
+    const html = `<h3>${esc(p.name)}</h3>
+      <div class="os-stats"><span>${I.auth} влияние <b>${Math.max(0, p.authority)}</b></span><span>в руке ${p.handCount}</span><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button></div>
+      ${C.hasOutpost(p) ? '<p class="muted">Защищён аванпостом: сначала уничтожьте аванпост, потом можно атаковать игрока и другие базы.</p>' : ''}
+      <div class="sec-title">Базы</div><div class="ob-grid">${bases || '<span class="none">Нет баз</span>'}</div>
+      ${canAtk ? `<div class="m-actions"><button class="btn danger big" data-act="atkplayer" data-target="${p.id}">Атаковать (${C.g.pool.combat} урона)</button></div>` : ''}`;
+    if (refresh && $('.modal.opp-modal')) { $('.modal.opp-modal').innerHTML = '<button class="x" data-act="close-modal">×</button>' + html; return; }
+    openModal(html, { kind: 'opp', cls: 'opp-modal', sheet: true });
   }
 
   function showDiscard(pid) {
     const g = S.room.game;
     const p = g.players.find((x) => x.id === pid);
     const cards = [...p.discard].reverse();
-    openModal(`<h3>Сброс: ${esc(p.name)} (${cards.length})</h3><div class="pick-grid">${cards.map((c) => cardHTML(c, { size: 'sm' })).join('') || '<div class="empty">Пусто</div>'}</div>`, { kind: 'discard', cls: 'wide' });
+    openModal(`<h3>Сброс: ${esc(p.name)} — ${cards.length}</h3><div class="pick-grid">${cards.map((c) => cardHTML(c, { size: 'sm' })).join('') || '<div class="empty">Пусто</div>'}</div>`, { kind: 'discard', cls: 'wide', sheet: isMobile() });
   }
 
   function attackModal(target) {
     const g = S.room.game;
     const p = g.players.find((x) => x.id === target);
     const max = g.pool.combat;
-    openModal(`<h3>Атаковать ${esc(p.name)}</h3><p class="hint">Влияние соперника: ${p.authority}. Доступно урона: ${max}.</p>
+    openModal(`<h3>Атаковать: ${esc(p.name)}</h3><p class="muted">Влияние соперника — ${p.authority}. У вас ${max} урона${g.players.filter((x) => x.alive).length > 2 ? '; урон можно разделить между соперниками' : ''}.</p>
       <div class="stepper"><button class="btn" id="a-minus">−</button><input id="a-val" type="number" min="1" max="${max}" value="${max}"><button class="btn" id="a-plus">+</button></div>
-      <div class="m-actions"><button class="btn" data-act="close-modal">Отмена</button><button class="btn danger big" id="a-go">⚔ Нанести урон</button></div>`, { kind: 'attack' });
+      <div class="m-actions"><button class="btn" data-act="close-modal">Отмена</button><button class="btn danger" id="a-go">Нанести урон</button></div>`, { kind: 'attack' });
     const inp = $('#a-val');
     const clamp = () => { inp.value = Math.max(1, Math.min(max, Math.floor(+inp.value || 1))); };
     $('#a-minus').onclick = () => { inp.value = +inp.value - 1; clamp(); };
@@ -572,13 +724,12 @@
     const g = S.room.game;
     const me = g.players.find((p) => p.id === S.pid);
     const warn = [];
-    if (me.hand.length) warn.push(`в руке ${cardsWord(me.hand.length)}`);
+    if (me.hand.length) warn.push(`в руке осталось ${cardsWord(me.hand.length)}`);
     const unused = me.bases.filter((b) => CARDS[b.cid].primary.length && !(b.used && b.used.primary));
     if (unused.length) warn.push(`не использованы базы: ${unused.map((b) => '«' + CARDS[b.cid].name + '»').join(', ')}`);
-    const targets = g.players.filter((p) => p.alive && p.id !== S.pid);
-    if (g.pool.combat > 0 && targets.length) warn.push(`не потрачен урон (${g.pool.combat})`);
+    if (g.pool.combat > 0 && g.players.some((p) => p.alive && p.id !== S.pid)) warn.push(`не потрачен урон (${g.pool.combat})`);
     const cheapest = Math.min(...g.row.filter(Boolean).map((c) => CARDS[c.cid].cost), g.explorers ? 2 : 99);
-    if (g.pool.trade >= cheapest) warn.push(`осталось ${g.pool.trade} торговли — можно что-то купить`);
+    if (g.pool.trade >= cheapest) warn.push(`осталось ${g.pool.trade} торговли — можно купить карту`);
     if (!warn.length) return act({ type: 'endTurn' });
     confirmBox(`Завершить ход?<small class="warn-list">${warn.map((w) => '• ' + esc(w)).join('<br>')}</small>`, 'Завершить ход', () => act({ type: 'endTurn' }));
   }
@@ -587,51 +738,27 @@
     const g = S.room.game;
     const me = g.players.find((p) => p.id === S.pid);
     openModal(`<h3>Меню</h3><div class="menu-list">
-      <button class="btn" data-act="toggle-sound">${S.sound ? '🔔 Звук хода: вкл' : '🔕 Звук хода: выкл'}</button>
+      <button class="btn" data-act="toggle-sound">${S.sound ? 'Звук начала хода: включён' : 'Звук начала хода: выключен'}</button>
       <button class="btn" data-act="copy-link">Скопировать ссылку на стол</button>
+      <button class="btn" data-act="tutorial">Как сделать ход</button>
       ${me && me.alive && !g.over ? '<button class="btn danger" data-act="forfeit">Сдаться</button>' : ''}
       ${!me || !me.alive || g.over ? '<button class="btn" data-act="leave">Выйти из-за стола</button>' : ''}
     </div>`, { kind: 'menu' });
   }
 
-  function showRules() {
-    openModal(`<div class="rules">
-      <h2>Как играть</h2>
-      <p><b>Цель:</b> довести влияние всех соперников до нуля. Последний оставшийся побеждает.</p>
-      <h4>Начало</h4>
-      <p>У каждого колода из 10 карт: 8 «Курьеров» (${IC.trade(1)}) и 2 «Перехватчика» (${IC.combat(1)}). Первый игрок берёт 3 карты, второй — 5 (в игре на 3+ игроков: 3, 4, затем по 5). Стартовое влияние задаёт хост.</p>
-      <h4>Ход</h4>
-      <ol>
-        <li><b>Играйте карты из руки</b> — щелчок по карте. Корабли дают ${IC.trade('n')} торговлю, ${IC.combat('n')} урон, ${IC.auth('n')} влияние и другие эффекты.</li>
-        <li><b>Покупайте</b> карты из торгового ряда за торговлю. Купленное идёт в ваш сброс. Старатель (2) есть всегда.</li>
-        <li><b>Атакуйте</b>: урон тратится на влияние соперников или на их базы. Можно разделить урон между несколькими соперниками.</li>
-        <li><b>Завершите ход</b>: сыгранные корабли и оставшиеся карты руки уходят в сброс, вы берёте 5 новых. Неистраченные торговля и урон сгорают.</li>
-      </ol>
-      <p>Когда колода кончается, сброс перемешивается в новую колоду.</p>
-      <h4>Блоки на карте</h4>
-      <div class="legend">
-        <div><span class="lg-box ab-p">Основная</span> срабатывает, когда карта сыграна.</div>
-        <div><span class="lg-box ab-a">${emblem('blob')} Союзная</span> срабатывает, если в этот ход у вас в игре есть другая карта той же фракции (сыгранный корабль или база).</div>
-        <div><span class="lg-box ab-s">${TRASH} Утилизация</span> по кнопке «Утилизировать»: карта навсегда убирается из игры, вы получаете эффект.</div>
-      </div>
-      <h4>Базы и аванпосты</h4>
-      <p>Базы остаются на столе и действуют каждый ваш ход. Простые эффекты базы срабатывают сами в начале хода; если нужно выбирать — жмите «Использовать». Чтобы уничтожить базу, нужно потратить урон, равный её защите (число в щите). <b>Аванпост</b> (тёмный щит) защищает владельца: пока он стоит, нельзя атаковать ни самого игрока, ни его обычные базы.</p>
-      <h4>Фракции</h4>
-      <div class="fac-list">
-        <div>${emblem('blob')} <b>Рой</b> — много урона, чистка торгового ряда.</div>
-        <div>${emblem('trade')} <b>Торговая Лига</b> — торговля и восстановление влияния.</div>
-        <div>${emblem('empire')} <b>Корона</b> — добор карт и сброс карт у соперников.</div>
-        <div>${emblem('machine')} <b>Машинный Орден</b> — утилизация слабых карт, сильные аванпосты.</div>
-      </div>
-      <p class="hint">Наведите курсор на карту (или удерживайте палец на телефоне), чтобы рассмотреть её крупно.</p>
-    </div>`, { kind: 'rules', cls: 'wide' });
-  }
-
   function copyLink() {
     const url = location.origin + location.pathname + '?room=' + S.room.code;
-    const done = () => toast('Ссылка скопирована — отправьте друзьям');
+    const done = () => toast('Ссылка скопирована — отправьте её друзьям');
     if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, () => prompt('Ссылка на стол:', url));
     else prompt('Ссылка на стол:', url);
+  }
+  function answered() { S.sel = []; S.selKey = null; closeModal(); }
+  function markChatSeen() {
+    if (S.side === 'chat' && S.room) {
+      S.chatSeenUser = S.room.chat.filter((c) => !c.sys).length;
+      S.unread = 0;
+      const ur = $('#unread'); if (ur) ur.classList.add('hidden');
+    }
   }
 
   // ───────────────── события ─────────────────
@@ -639,11 +766,12 @@
   document.addEventListener('click', (e) => {
     if (suppressClick) { suppressClick = false; e.preventDefault(); return; }
     const el = e.target.closest('[data-act]');
-    // на сенсорных экранах нажатие на карту рынка/соперника открывает её крупно с кнопками
-    const card = e.target.closest('.card[data-zone]');
-    if (isTouch && card && ['row', 'oppbase', 'mybase', 'play'].includes(card.dataset.zone) && (!el || el === card) && !S.modal) {
-      cardModal(card);
-      return;
+    const card = e.target.closest('.card[data-cid]');
+    // нажатие на карту без своего действия — открыть описание
+    if (card && !card.closest('.modal') && (!el || el === card)) {
+      const zone = card.dataset.zone;
+      const direct = el === card && (zone === 'hand' || (!isTouch && (zone === 'row' || zone === 'oppbase')));
+      if (!direct) { cardModal(card); return; }
     }
     if (!el) return;
     const a = el.dataset.act, d = el.dataset;
@@ -661,22 +789,26 @@
       case 'kick': confirmBox('Убрать этого игрока?', 'Убрать', () => send({ t: 'kick', pid: d.pid }), true); break;
       case 'copy-link': copyLink(); break;
       case 'rules': showRules(); break;
+      case 'tutorial': showTutorial(); break;
+      case 'tutorial-ok': store.set('sd_tutorial', '1'); closeModal(); render(); break;
       case 'menu': showMenu(); break;
       case 'toggle-sound': S.sound = !S.sound; store.set('sd_sound', S.sound ? '1' : '0'); showMenu(); break;
       case 'forfeit': confirmBox('Сдаться и выйти из партии?', 'Сдаться', () => act({ type: 'forfeit' }), true); break;
       case 'tolobby': closeModal(); send({ t: 'toLobby' }); break;
       case 'show-go': renderGameOver(S.room.game, S.room.hostId === S.pid); break;
-      case 'close-modal': if (S.modal !== 'prompt') closeModal(); break;
-      case 'close-modal-bg': if (e.target === el) closeModal(); break;
-      case 'play': act({ type: 'play', uid: d.uid }); break;
+      case 'close-modal': if (S.modal !== 'prompt') { closeModal(); S.oppSheet = null; } break;
+      case 'close-modal-bg': if (e.target === el) { closeModal(); S.oppSheet = null; } break;
+      case 'play': if (S.modal === 'card') closeModal(); act({ type: 'play', uid: d.uid }); break;
       case 'playall': act({ type: 'playAll' }); break;
       case 'buy': if (S.modal === 'card') closeModal(); act({ type: 'buy', slot: d.slot === 'explorer' ? 'explorer' : +d.slot }); break;
-      case 'scrap': e.stopPropagation(); act({ type: 'scrap', uid: d.uid }); break;
-      case 'activate': e.stopPropagation(); act({ type: 'activate', uid: d.uid }); break;
+      case 'scrap': e.stopPropagation(); if (S.modal === 'card') closeModal(); act({ type: 'scrap', uid: d.uid }); break;
+      case 'activate': e.stopPropagation(); if (S.modal === 'card') closeModal(); act({ type: 'activate', uid: d.uid }); break;
       case 'atkbase': if (S.modal === 'card') closeModal(); act({ type: 'attackBase', target: d.target, uid: d.uid }); break;
-      case 'atkplayer': attackModal(d.target); break;
+      case 'atkplayer': S.oppSheet = null; attackModal(d.target); break;
+      case 'opp-sheet': oppSheet(d.pid); break;
       case 'endturn': endTurnCheck(); break;
       case 'view-discard': showDiscard(d.pid); break;
+      case 'view-deck': toast(`В колоде ${cardsWord(S.room.game.players.find((p) => p.id === S.pid).deckCount)}. Порядок карт скрыт.`); break;
       case 'choose': answered(); act({ type: 'answer', option: +d.i }); break;
       case 'opp': answered(); act({ type: 'answer', target: d.target }); break;
       case 'pick': {
@@ -692,7 +824,7 @@
       case 'toggle-side': S.sideOpen = !S.sideOpen; $('#side') && $('#side').classList.toggle('open', S.sideOpen); markChatSeen(); break;
       case 'tab':
         S.side = d.tab;
-        document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === S.side));
+        $$('.tabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === S.side));
         $('#side-log').classList.toggle('hidden', S.side !== 'log');
         $('#side-chat').classList.toggle('hidden', S.side !== 'chat');
         markChatSeen();
@@ -700,41 +832,29 @@
     }
   });
 
-  // ответ отправлен — закрываем окно сразу, чтобы двойной щелчок не ушёл в следующий выбор
-  function answered() { S.sel = []; S.selKey = null; closeModal(); }
-
-  function markChatSeen() {
-    if (S.side === 'chat' && S.room) {
-      S.chatSeenUser = S.room.chat.filter((c) => !c.sys).length;
-      S.unread = 0;
-      const ur = $('#unread'); if (ur) ur.classList.add('hidden');
-    }
-  }
-
-  // крупный просмотр карты при наведении (компьютер) и долгом нажатии (телефон)
+  // описание при наведении (компьютер) и долгом нажатии (телефон)
   const zoom = $('#zoom');
   let zoomTimer = null;
   if (!isTouch) {
     document.addEventListener('mouseover', (e) => {
       const card = e.target.closest('.card[data-cid]');
-      if (!card || card.closest('.zoom') || card.classList.contains('lg') || card.closest('.hero-cards')) return;
+      if (!card || card.closest('.zoom') || card.closest('.modal') || card.closest('.hero-cards')) return;
       clearTimeout(zoomTimer);
       zoomTimer = setTimeout(() => {
-        zoom.innerHTML = cardHTML({ cid: card.dataset.cid, copied: null }, { size: 'lg' });
-        const r = card.getBoundingClientRect();
-        const W = 300, H = 420;
-        let x = r.right + 12;
-        if (x + W > innerWidth - 8) x = r.left - W - 12;
-        if (x < 8) x = Math.max(8, innerWidth - W - 8);
-        let y = Math.min(innerHeight - H - 8, Math.max(8, r.top + r.height / 2 - H / 2));
-        zoom.style.left = x + 'px'; zoom.style.top = y + 'px';
+        zoom.innerHTML = detailHTML({ cid: card.dataset.cid }, '');
         zoom.classList.remove('hidden');
-      }, 280);
+        const r = card.getBoundingClientRect();
+        const Wd = zoom.offsetWidth, Ht = zoom.offsetHeight;
+        let x = r.right + 12;
+        if (x + Wd > innerWidth - 8) x = r.left - Wd - 12;
+        if (x < 8) x = Math.max(8, innerWidth - Wd - 8);
+        const y = Math.min(innerHeight - Ht - 8, Math.max(8, r.top + r.height / 2 - Ht / 2));
+        zoom.style.left = x + 'px'; zoom.style.top = y + 'px';
+      }, 350);
     });
     document.addEventListener('mouseout', (e) => {
       const card = e.target.closest('.card[data-cid]');
-      if (!card) return;
-      if (e.relatedTarget && card.contains(e.relatedTarget)) return;
+      if (!card || (e.relatedTarget && card.contains(e.relatedTarget))) return;
       clearTimeout(zoomTimer);
       zoom.classList.add('hidden');
     });
@@ -743,21 +863,14 @@
     let lp = null;
     document.addEventListener('touchstart', (e) => {
       const card = e.target.closest('.card[data-cid]');
-      if (!card || card.classList.contains('lg')) return;
-      lp = setTimeout(() => {
-        suppressClick = true;
-        openModal(`<div class="zoom-modal">${cardHTML({ cid: card.dataset.cid }, { size: 'lg' })}</div>`, { kind: S.modal === 'prompt' ? 'prompt-zoom' : 'card', cls: 'card-modal' });
-        if (S.modal === 'prompt-zoom') setTimeout(() => { closeModal(); render(); }, 1800);
-      }, 480);
+      if (!card || card.closest('.modal')) return;
+      lp = setTimeout(() => { suppressClick = true; cardModal(card); }, 450);
     }, { passive: true });
     const cancel = () => clearTimeout(lp);
     document.addEventListener('touchend', cancel);
     document.addEventListener('touchmove', cancel, { passive: true });
   }
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && S.modal && S.modal !== 'prompt') closeModal();
-  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.modal && S.modal !== 'prompt') closeModal(); });
 
   connect();
 })();
