@@ -61,6 +61,8 @@ class Game {
     this.over = false;
     this.winner = null;
     this.lastEvent = null;
+    this.revealSeq = 0;
+    this.undoStack = [];
 
     // Размер стартовой руки: 2 игрока — 3/5; больше — 3/4/5/5…
     const n = this.players.length;
@@ -100,6 +102,7 @@ class Game {
       p.hand.push(p.deck.pop());
       got++;
     }
+    if (got) this.revealSeq++;
     return got;
   }
 
@@ -228,7 +231,7 @@ class Game {
     return null;
   }
 
-  refillRow(i) { this.row[i] = this.tradeDeck.pop() || null; }
+  refillRow(i) { this.row[i] = this.tradeDeck.pop() || null; this.revealSeq++; }
 
   handlePick(pr, uids) {
     const p = this.cur();
@@ -385,8 +388,10 @@ class Game {
     if (a.type === 'forfeit') { this.forfeit(pid); return; }
     const p = this.cur();
     if (p.id !== pid) fail('Сейчас не ваш ход');
-    if (this.prompt && a.type !== 'answer') fail('Сначала завершите выбор');
+    if (this.prompt && a.type !== 'answer' && a.type !== 'undo') fail('Сначала завершите выбор');
     this.lastEvent = null;
+    // покупка, атака, утилизация, база, конец хода — дальше отменять розыгрыш нельзя
+    if (!['play', 'playAll', 'answer', 'undo'].includes(a.type)) this.undoStack = [];
 
     switch (a.type) {
       case 'play': this.play(p, a.uid); break;
@@ -404,14 +409,40 @@ class Game {
       case 'attackBase': this.attackBase(p, a.target, a.uid); break;
       case 'attackPlayer': this.attackPlayer(p, a.target, a.amount); break;
       case 'answer': this.answer(p, a); break;
+      case 'undo': this.undo(p, a.uid); break;
       case 'endTurn': this.endTurn(); break;
       default: fail('Неизвестное действие');
     }
   }
 
+  snapshot(uid) {
+    return {
+      uid, revealSeq: this.revealSeq, logLen: this.log.length,
+      data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext })),
+    };
+  }
+
+  // Какие сыгранные карты сейчас можно вернуть в руку
+  undoable() { return this.undoStack.filter((s) => s.revealSeq === this.revealSeq).map((s) => s.uid); }
+
+  undo(p, uid) {
+    const k = this.undoStack.findIndex((s) => s.uid === uid);
+    if (k < 0) fail('Эту карту уже нельзя вернуть');
+    const snap = this.undoStack[k];
+    if (snap.revealSeq !== this.revealSeq) fail('Карту нельзя вернуть: после неё открылись новые карты');
+    const returned = this.undoStack.slice(k).map((s) => s.uid);
+    const names = returned.map((u) => { const c = [...p.inPlay, ...p.bases].find((x) => x.uid === u); return c ? `«${CARDS[c.cid].name}»` : null; }).filter(Boolean);
+    Object.assign(this, snap.data);
+    this.queue = []; this.prompt = null; this.promptSrc = null;
+    this.log.length = Math.min(this.log.length, snap.logLen);
+    this.undoStack = this.undoStack.slice(0, k);
+    this.addLog(`${p.name} возвращает в руку ${names.join(', ')}`, 'sys');
+  }
+
   play(p, uid) {
     const i = p.hand.findIndex((c) => c.uid === uid);
     if (i < 0) fail('Карты нет в руке');
+    this.undoStack.push(this.snapshot(uid));
     const c = p.hand.splice(i, 1)[0];
     const d = def(c);
     c.used = {};
@@ -568,6 +599,7 @@ class Game {
       explorers: this.explorers,
       turn: cur.id,
       turnNo: this.turnNo,
+      undoable: cur.id === pid ? this.undoable() : [],
       pool: this.pool,
       topNext: this.topNext,
       prompt,

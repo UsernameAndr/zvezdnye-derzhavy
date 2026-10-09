@@ -15,6 +15,8 @@ function totalCards(g) {
 function botStep(g) {
   const p = g.cur();
   const pr = g.prompt;
+  const und = g.undoable();
+  if (und.length && Math.random() < 0.08) return { type: 'undo', uid: pick(und) };
   if (pr) {
     if (pr.kind === 'choose') return { type: 'answer', option: Math.floor(Math.random() * pr.options.length) };
     if (pr.kind === 'opponent') return { type: 'answer', target: pick(pr.options) };

@@ -177,13 +177,14 @@
     const style = `--fc:${F.color};--fd:${F.dark};--fl:${F.light}`;
     const attrs = `data-cid="${cid}" ${c.uid ? `data-uid="${c.uid}"` : ''} ${o.attrs || ''}`;
     const art = `<img class="c-art" src="${window.cardArtURL(cid)}" alt="" draggable="false">`;
-    const cls = `card ${size} f-${d.faction} ${base ? 'is-base' : ''} ${d.outpost ? 'is-outpost' : ''} ${o.cls || ''}`;
+    const cls = `card ${size} f-${d.faction} ${base ? 'is-base' : ''} ${d.outpost ? 'is-outpost' : ''} ${o.undo ? 'has-undo' : ''} ${o.cls || ''}`;
+    const undoBtn = o.undo ? `<button class="c-undo" data-act="undo" data-uid="${c.uid}" title="Вернуть карту в руку" aria-label="Вернуть карту в руку">×</button>` : '';
     const defBadge = base ? `<span class="c-def ${d.outpost ? 'out' : ''}" title="${d.outpost ? 'Аванпост — защищает владельца' : 'Защита базы'}">${d.defense}</span>` : '';
     if (size === 'mini') {
       return `<div class="${cls}" ${attrs} style="${style}">${art}
         ${d.cost ? `<span class="c-cost">${d.cost}</span>` : ''}${defBadge}
         <div class="m-foot"><div class="m-sum">${summary(d)}</div><div class="m-name">${esc(d.name)}</div></div>
-        ${c.copied ? '<span class="c-copy">копия</span>' : ''}${o.badge || ''}
+        ${c.copied ? '<span class="c-copy">копия</span>' : ''}${o.badge || ''}${undoBtn}
         ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}</div>`;
     }
     let prim = abil(d.primary);
@@ -198,7 +199,7 @@
         ${d.ally.length ? `<div class="ab ab-a ${used.ally ? 'done' : ''}"><span class="lbl">${emblem(d.faction)}Союз</span>${abil(d.ally)}</div>` : ''}
         ${d.scrap.length ? `<div class="ab ab-s"><span class="lbl">${TRASH}Утиль</span>${abil(d.scrap)}</div>` : ''}
       </div>
-      ${o.badge || ''}
+      ${o.badge || ''}${undoBtn}
       ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}
     </div>`;
   }
@@ -262,6 +263,7 @@
     openModal(`<div class="rules"><h2>Правила</h2>${rulesShortHTML()}
       <h4>Подробнее</h4>
       <p>У каждого колода из 10 карт: 8 «Курьеров» (+1 к деньгам) и 2 «Перехватчика» (+1 урона). Первый игрок начинает с 3 картами, второй — с 5 (в игре на троих и больше: 3, 4, затем по 5). Когда колода кончается, сброс перемешивается в новую колоду.</p>
+      <p><b>Передумали?</b> На сыгранной карте есть крестик — он возвращает её в руку. Вернуть карту можно, пока вы ничего не купили и не атаковали и пока эта карта не дала взять новые карты (их уже видно).</p>
       <p><b>Корабли</b> действуют один ход и уходят в сброс. <b>Базы</b> остаются на столе и действуют каждый ваш ход; простые эффекты баз срабатывают сами, а если нужно выбирать — нажмите «Использовать». Чтобы уничтожить базу, потратьте урон, равный её защите (число в щите). Тёмный щит — <b>аванпост</b>: он защищает владельца и его остальные базы.</p>
       <h4>Фракции</h4>
       <div class="fac-list">
@@ -467,6 +469,7 @@
     let opps = g.players.filter((p) => p.id !== S.pid);
     if (me) { const i = g.players.indexOf(me); opps = [...g.players.slice(i + 1), ...g.players.slice(0, i)]; }
     const tip = coach(C);
+    if (myTurn && !blocked && (g.undoable || []).length && !me.hand.length) tip.text += ' <span class="muted">Ошиблись с картой? Крестик на ней вернёт её в руку.</span>';
     const combat = g.pool.combat, trade = g.pool.trade;
 
     // соперники
@@ -520,7 +523,7 @@
     const playHTML = cur.inPlay.map((c) => {
       const d = CARDS[c.copied || c.cid];
       const acts = isMe && myTurn && !blocked && d.scrap.length ? `<button class="mini-btn" data-act="scrap" data-uid="${c.uid}">Утилизировать</button>` : '';
-      return cardHTML(c, { size: ps, actions: acts, attrs: 'data-zone="play"' });
+      return cardHTML(c, { size: ps, actions: acts, attrs: 'data-zone="play"', undo: isMe && myTurn && (g.undoable || []).includes(c.uid) });
     }).join('');
 
     // моя зона
@@ -533,7 +536,7 @@
           if (d.primary.length && !used.primary) acts += `<button class="mini-btn use" data-act="activate" data-uid="${b.uid}">Использовать</button>`;
           if (d.scrap.length) acts += `<button class="mini-btn" data-act="scrap" data-uid="${b.uid}">Утилизировать</button>`;
         }
-        return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"' });
+        return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"', undo: myTurn && (g.undoable || []).includes(b.uid) });
       }).join('');
       const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
       const top = me.discard[me.discard.length - 1];
@@ -635,6 +638,11 @@
       body += `<div class="m-actions">${pr.min === 0 ? '<button class="btn" data-act="pick-skip">Пропустить</button>' : ''}
         <span class="sel-count">Выбрано ${S.sel.length} из ${pr.max}</span>
         <button class="btn primary" data-act="pick-ok" ${ok ? '' : 'disabled'}>Подтвердить</button></div>`;
+    }
+    const und = g.undoable || [];
+    if (und.length && pr.purpose !== 'discard') {
+      const last = und[und.length - 1];
+      body += `<div class="m-actions undo-row"><button class="btn ghost" data-act="undo" data-uid="${last}">Отменить — вернуть карту в руку</button></div>`;
     }
     openModal(`<h3>${esc(pr.text)}</h3>${body}`, { kind: 'prompt', locked: true, cls: 'wide', sheet: isMobile() });
   }
@@ -800,6 +808,7 @@
       case 'close-modal-bg': if (e.target === el) { closeModal(); S.oppSheet = null; } break;
       case 'play': if (S.modal === 'card') closeModal(); act({ type: 'play', uid: d.uid }); break;
       case 'playall': act({ type: 'playAll' }); break;
+      case 'undo': e.stopPropagation(); if (S.modal === 'prompt') answered(); else if (S.modal === 'card') closeModal(); act({ type: 'undo', uid: d.uid }); break;
       case 'buy': if (S.modal === 'card') closeModal(); act({ type: 'buy', slot: d.slot === 'explorer' ? 'explorer' : +d.slot }); break;
       case 'scrap': e.stopPropagation(); if (S.modal === 'card') closeModal(); act({ type: 'scrap', uid: d.uid }); break;
       case 'activate': e.stopPropagation(); if (S.modal === 'card') closeModal(); act({ type: 'activate', uid: d.uid }); break;

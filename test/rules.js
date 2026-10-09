@@ -130,3 +130,44 @@ t('стартовые руки: 3/4/5/5', () => {
   const g = new Game([1, 2, 3, 4].map((i) => ({ id: 'p' + i, name: 'x' })), { authority: 50, randomOrder: false });
   assert.deepEqual(g.players.map((p) => p.hand.length), [3, 4, 5, 5]);
 });
+
+t('сыгранную карту можно вернуть в руку', () => {
+  const { g, p } = setup(2, ['viper', 'scout', 't_post']);
+  const ids = p.hand.map((c) => c.uid);
+  g.act('p0', { type: 'playAll' });
+  assert.equal(g.pool.combat, 1);
+  assert.equal(p.bases.length, 1);
+  assert.deepEqual(g.undoable().sort(), ids.slice().sort());
+  // вернуть вторую карту — вернутся она и все сыгранные после неё
+  g.act('p0', { type: 'undo', uid: ids[1] });
+  const me = g.cur();
+  assert.equal(me.hand.length, 2);
+  assert.equal(me.bases.length, 0);
+  assert.equal(g.pool.trade, 0);
+  assert.equal(g.pool.combat, 1);
+  assert.deepEqual(g.undoable(), [ids[0]]);
+});
+
+t('нельзя вернуть карту, если она открыла новые карты', () => {
+  const { g, p } = setup(2, ['e_corvette', 'scout']);
+  g.act('p0', { type: 'play', uid: p.hand[0].uid }); // берёт карту
+  assert.deepEqual(g.undoable(), []);
+});
+
+t('после покупки вернуть карту нельзя', () => {
+  const { g, p } = setup(2, ['scout', 'scout']);
+  g.act('p0', { type: 'playAll' });
+  g.act('p0', { type: 'buy', slot: 'explorer' });
+  assert.deepEqual(g.undoable(), []);
+  assert.throws(() => g.act('p0', { type: 'undo', uid: 'x' }), /нельзя/);
+});
+
+t('выбор можно отменить, вернув карту', () => {
+  const { g, p } = setup(2, ['m_patrol']);
+  const uid = p.hand[0].uid;
+  g.act('p0', { type: 'play', uid });
+  assert.equal(g.prompt.kind, 'choose');
+  g.act('p0', { type: 'undo', uid });
+  assert.equal(g.prompt, null);
+  assert.equal(g.cur().hand.length, 1);
+});
