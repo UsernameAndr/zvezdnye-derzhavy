@@ -33,6 +33,7 @@
   const mqWide = matchMedia('(min-width: 1101px)');
   for (const mq of [mqMobile, mqWide]) mq.addEventListener && mq.addEventListener('change', () => { S.screen = null; render(); });
   const PCOLORS = ['#d9a54a', '#5fa8d3', '#a78bd4', '#6cc28f', '#d4708f', '#c9c25a'];
+  const TEAMC = { A: '#d9a54a', B: '#5fa8d3' };
 
   // ───────────────── сеть ─────────────────
   function connect() {
@@ -70,6 +71,7 @@
         render();
         break;
       case 'replaced': toast('Игра открыта в другой вкладке', 'warn'); break;
+      case 'admin': if (m.ok) { S.adminPending = false; adminPanel(); } break;
       case 'error': toast(m.msg, 'err'); if (S.room && S.room.game) render(); break;
     }
   }
@@ -353,35 +355,62 @@
       $('#l-chatform').addEventListener('submit', (e) => { e.preventDefault(); const i = e.target.querySelector('input'); if (i.value.trim()) send({ t: 'chat', text: i.value }); i.value = ''; });
     }
     $('#l-code').textContent = r.code;
+    const teamsMode = r.settings.mode === 'teams';
     $('#l-ptitle').textContent = `Игроки — ${r.members.length} из ${r.settings.maxPlayers}`;
-    $('#l-players').innerHTML = r.members.map((m, i) => `<div class="l-player">
-        <span class="avatar" style="--pc:${PCOLORS[i % 6]}">${esc((m.name || '?')[0].toUpperCase())}</span>
+    const row = (m, i) => {
+      const tm = (r.teams || {})[m.id] || 'A';
+      const canMove = teamsMode && (m.id === S.pid || host);
+      return `<div class="l-player">
+        <span class="avatar" style="--pc:${teamsMode ? TEAMC[tm] : PCOLORS[i % 6]}">${esc((m.name || '?')[0].toUpperCase())}</span>
         <span class="nm">${esc(m.name)}${m.id === S.pid ? ' <small>(вы)</small>' : ''}</span>
         ${m.id === r.hostId ? '<span class="tag-s">хост</span>' : ''}
         ${!m.connected ? '<span class="tag-s muted">не в сети</span>' : ''}
+        ${canMove ? `<button class="lnk" data-act="team" data-pid="${m.id}" data-team="${tm === 'A' ? 'B' : 'A'}">в команду ${tm === 'A' ? 'Б' : 'А'}</button>` : ''}
         ${host && m.id !== S.pid ? `<button class="lnk" data-act="kick" data-pid="${m.id}">убрать</button>` : ''}
-      </div>`).join('') + (r.members.length < r.settings.maxPlayers ? '<div class="l-player empty-seat">Свободное место</div>' : '');
+      </div>`;
+    };
+    const empty = r.members.length < r.settings.maxPlayers ? '<div class="l-player empty-seat">Свободное место</div>' : '';
+    if (teamsMode) {
+      const col = (t) => {
+        const ms = r.members.map((m, i) => [m, i]).filter(([m]) => ((r.teams || {})[m.id] || 'A') === t);
+        return `<div class="team-col" style="--tc:${TEAMC[t]}"><div class="team-h">Команда ${t === 'A' ? 'А' : 'Б'} <span class="muted">${ms.length}/2</span></div>${ms.map(([m, i]) => row(m, i)).join('') || '<div class="l-player empty-seat">Пусто</div>'}</div>`;
+      };
+      $('#l-players').innerHTML = `<div class="team-cols">${col('A')}${col('B')}</div>`;
+    } else {
+      $('#l-players').innerHTML = r.members.map(row).join('') + empty;
+    }
 
     const st = r.settings;
     const chips = (k, vals, cur, fmt = (v) => v) => vals.map((v) => `<button class="seg ${cur === v ? 'on' : ''}" ${host ? `data-act="set" data-k="${k}" data-v="${v}"` : 'disabled'}>${fmt(v)}</button>`).join('');
     const sEl = $('#l-settings');
     const typing = document.activeElement && document.activeElement.id === 'l-auth';
     if (typing) {
-      $$('.seg[data-k]', sEl).forEach((b) => b.classList.toggle('on', String(st[b.dataset.k]) === b.dataset.v));
+      $$('.seg[data-k]', sEl).forEach((b) => b.classList.toggle('on', String(st[b.dataset.k] === undefined ? '' : st[b.dataset.k]) === b.dataset.v));
     } else {
+      const deckLbl = { auto: 'Авто', 1: '80', 1.5: '120', 2: '160' };
       sEl.innerHTML = `
-        <div class="set"><div class="set-l">Стартовое здоровье</div>
+        <div class="set"><div class="set-l">Режим</div><div class="segs">${chips('mode', ['ffa', 'teams'], st.mode || 'ffa', (v) => (v === 'ffa' ? 'Каждый сам за себя' : '2 на 2'))}</div>
+          ${teamsMode ? '<p class="muted small set-note">Общее здоровье и общий ход у напарников: деньги и урон складываются, союзы срабатывают и от карт напарника.</p>' : ''}</div>
+        <div class="set"><div class="set-l">${teamsMode ? 'Здоровье команды' : 'Стартовое здоровье'}</div>
           <div class="segs">${chips('authority', [20, 30, 40, 50, 75, 100], st.authority)}</div>
           ${host ? `<label class="custom">Своё значение <input id="l-auth" type="number" min="1" max="999" value="${st.authority}"></label>` : ''}
         </div>
-        <div class="set"><div class="set-l">Мест за столом</div><div class="segs">${chips('maxPlayers', [2, 3, 4, 5, 6], st.maxPlayers)}</div></div>
+        ${teamsMode ? '' : `<div class="set"><div class="set-l">Мест за столом</div><div class="segs">${chips('maxPlayers', [2, 3, 4, 5, 6], st.maxPlayers)}</div></div>`}
+        <div class="set"><div class="set-l">Торговая колода</div><div class="segs">${chips('deckSize', ['auto', '1', '1.5', '2'], String(st.deckSize || 'auto'), (v) => deckLbl[v])}</div>
+          <p class="muted small set-note">${String(st.deckSize || 'auto') === 'auto' ? 'Авто: 80 карт на 2–3 игроков, 120 на 4, 160 на 5–6.' : 'Карт в торговой колоде на всю партию.'}</p></div>
         <div class="set"><div class="set-l">Первый ход</div><div class="segs">${chips('randomOrder', [true, false], st.randomOrder, (v) => (v ? 'Случайно' : 'По порядку входа'))}</div></div>
         ${host ? '' : '<p class="muted">Настройки выбирает хост.</p>'}`;
       const ai = $('#l-auth');
       if (ai) ai.addEventListener('change', () => send({ t: 'settings', settings: { ...S.room.settings, authority: ai.value } }));
     }
+    let startOk = r.members.length >= 2, startLbl = startOk ? 'Начать игру' : 'Ждём игроков…';
+    if (teamsMode) {
+      const a = r.members.filter((m) => ((r.teams || {})[m.id] || 'A') === 'A').length;
+      startOk = r.members.length === 4 && a === 2;
+      startLbl = r.members.length < 4 ? `Нужно 4 игрока (${r.members.length}/4)` : startOk ? 'Начать игру' : 'Нужно по 2 в команде';
+    }
     $('#l-start').innerHTML = host
-      ? `<button class="btn primary big" data-act="start" ${r.members.length < 2 ? 'disabled' : ''}>${r.members.length < 2 ? 'Ждём игроков…' : 'Начать игру'}</button>`
+      ? `<button class="btn primary big" data-act="start" ${startOk ? '' : 'disabled'}>${startLbl}</button>`
       : '<span class="muted">Ждём, когда хост начнёт игру…</span>';
     renderChat($('#l-chatlog'));
   }
@@ -396,36 +425,45 @@
   // ───────────────── игра ─────────────────
   function ctx() {
     const r = S.room, g = r.game;
+    const teams = g.mode === 'teams';
     const me = g.players.find((p) => p.id === S.pid);
-    const cur = g.players.find((p) => p.id === g.turn);
-    const myTurn = !!me && g.turn === S.pid && !g.over;
+    const active = g.active || [g.turn];
+    const actives = g.players.filter((p) => active.includes(p.id));
+    const cur = actives[0] || g.players[0];
+    const myTurn = !!me && me.alive && active.includes(S.pid) && !g.over;
     const blocked = !!g.prompt;
-    const colorOf = (pid) => PCOLORS[g.players.findIndex((p) => p.id === pid) % 6];
-    const hasOutpost = (p) => p.bases.some((b) => CARDS[b.cid].outpost);
-    return { r, g, me, cur, myTurn, blocked, colorOf, hasOutpost, host: r.hostId === S.pid };
+    const ready = (g.ready || []).includes(S.pid);
+    const mate = teams && me ? g.players.find((p) => p.team === me.team && p.id !== me.id) : null;
+    const colorOf = (pid) => { const p = g.players.find((x) => x.id === pid); return teams && p ? TEAMC[p.team] : PCOLORS[g.players.findIndex((x) => x.id === pid) % 6]; };
+    const hasOutpost = (p) => g.players.some((o) => o.team === p.team && o.bases.some((b) => CARDS[b.cid].outpost));
+    const isEnemy = (p) => !me || p.team !== me.team;
+    const curName = teams ? actives.map((p) => esc(p.name)).join(' и ') : esc(cur.name);
+    return { r, g, me, cur, actives, myTurn, blocked, ready, mate, teams, colorOf, hasOutpost, isEnemy, curName, host: r.hostId === S.pid };
   }
 
   function canAttackBase(C, owner, b) {
     const d = CARDS[b.cid];
-    if (!C.myTurn || C.blocked || !owner.alive || owner.id === S.pid) return false;
+    if (!C.myTurn || C.blocked || !owner.alive || !C.isEnemy(owner)) return false;
     if (!d.outpost && C.hasOutpost(owner)) return false;
     return C.g.pool.combat >= d.defense;
   }
 
   // подсказка «что делать сейчас»
   function coach(C) {
-    const { g, me, cur, myTurn } = C;
+    const { g, me, myTurn } = C;
     if (g.over) return { text: 'Партия окончена.', cue: '' };
     if (!me || !me.alive) return { text: 'Вы наблюдаете за партией.', cue: '' };
-    if (!myTurn) return { text: `Сейчас ходит ${esc(cur.name)}. ${isTouch ? 'Нажмите на карту, чтобы прочитать её описание.' : 'Наведите курсор на карту, чтобы прочитать описание.'}`, cue: '' };
+    if (!myTurn) return { text: `Сейчас ${C.teams ? 'ходит команда' : 'ходит'} ${C.curName}. ${isTouch ? 'Нажмите на карту, чтобы прочитать её описание.' : 'Наведите курсор на карту, чтобы прочитать описание.'}`, cue: '' };
+    if (g.prompt && g.prompt.waiting) return { text: 'Напарник делает выбор — секунду.', cue: '' };
     if (g.prompt) return { text: 'Сделайте выбор в открытом окне.', cue: '' };
+    if (C.ready) return { text: `Вы готовы завершить ход. Ждём, когда ${esc(C.mate ? C.mate.name : 'напарник')} тоже нажмёт «Завершить ход».`, cue: '' };
     if (me.hand.length) return { text: `<b>Шаг 1.</b> Сыграйте карты из руки — ${isTouch ? 'нажмите на карту' : 'щёлкните по карте'} или «Сыграть все».`, cue: 'hand' };
     const manual = me.bases.filter((b) => CARDS[b.cid].primary.length && !(b.used && b.used.primary));
     if (manual.length) return { text: `Используйте базу «${esc(CARDS[manual[0].cid].name)}» — кнопка «Использовать» на карте.`, cue: 'bases' };
     const affordable = g.row.some((c) => c && CARDS[c.cid].cost <= g.pool.trade) || (g.explorers > 0 && g.pool.trade >= 2);
     if (affordable) return { text: `<b>Шаг 2.</b> Денег: ${g.pool.trade} — купите карту из ряда (подсвечены). Купленное попадёт в ваш сброс.`, cue: 'market' };
     if (g.pool.combat > 0) {
-      const ops = g.players.filter((p) => p.alive && p.id !== S.pid);
+      const ops = g.players.filter((p) => p.alive && C.isEnemy(p));
       const blockedByOut = ops.length && ops.every((p) => C.hasOutpost(p));
       if (blockedByOut) {
         const can = ops.some((p) => p.bases.some((b) => canAttackBase(C, p, b)));
@@ -437,7 +475,7 @@
 
   function renderGame() {
     const C = ctx();
-    const { r, g, me, cur, myTurn, blocked, colorOf, host } = C;
+    const { r, g, me, cur, myTurn, blocked, colorOf, host, teams, mate } = C;
     const mobile = isMobile();
     const app = $('#app');
     if (S.screen !== 'game') {
@@ -468,8 +506,10 @@
 
     let opps = g.players.filter((p) => p.id !== S.pid);
     if (me) { const i = g.players.indexOf(me); opps = [...g.players.slice(i + 1), ...g.players.slice(0, i)]; }
+    opps = opps.filter((p) => C.isEnemy(p));
     const tip = coach(C);
     if (myTurn && !blocked && (g.undoable || []).length && !me.hand.length) tip.text += ' <span class="muted">Ошиблись с картой? Крестик на ней вернёт её в руку.</span>';
+    if (teams && myTurn && !blocked && !C.ready && tip.cue) tip.text += ' <span class="muted">Деньги и урон общие с напарником.</span>';
     const combat = g.pool.combat, trade = g.pool.trade;
 
     // соперники
@@ -480,7 +520,7 @@
       const anyBaseTarget = p.bases.some((b) => canAttackBase(C, p, b));
       const offline = m && !m.connected;
       if (mobile) {
-        return `<button class="opp-chip ${p.id === g.turn ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''} ${canAtk || anyBaseTarget ? 'target' : ''}" style="--pc:${colorOf(p.id)}" data-act="opp-sheet" data-pid="${p.id}">
+        return `<button class="opp-chip ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''} ${canAtk || anyBaseTarget ? 'target' : ''}" style="--pc:${colorOf(p.id)}" data-act="opp-sheet" data-pid="${p.id}">
           <span class="avatar">${esc(p.name[0].toUpperCase())}</span>
           <span class="oc-body"><span class="oc-name">${esc(p.name)}${offline ? ' · офлайн' : ''}</span>
           <span class="oc-meta">${p.alive ? `<span class="hp ${p.authority <= 10 ? 'low' : ''}">${I.auth}${Math.max(0, p.authority)}</span><span>баз ${p.bases.length}${C.hasOutpost(p) ? ' 🛡' : ''}</span><span>✋${p.handCount}</span>` : 'выбыл'}</span></span>
@@ -491,7 +531,7 @@
         const can = canAttackBase(C, p, b);
         return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}` });
       }).join('');
-      return `<div class="opp ${p.id === g.turn ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
+      return `<div class="opp ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
         <div class="opp-head"><span class="avatar">${esc(p.name[0].toUpperCase())}</span>
           <div class="opp-nm"><b>${esc(p.name)}</b>${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
           <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Здоровье">${Math.max(0, p.authority)}</div></div>
@@ -504,6 +544,30 @@
         : `<div class="muted">выбыл${p.place ? ` · ${p.place} место` : ''}</div>`}
       </div>`;
     }).join('');
+
+    // напарник
+    let mateHTML = '';
+    if (mate) {
+      const mm = r.members.find((x) => x.id === mate.id);
+      const offline = mm && !mm.connected;
+      const rdy = (g.ready || []).includes(mate.id);
+      if (mobile) {
+        mateHTML = `<button class="opp-chip mate ${(g.active || []).includes(mate.id) ? 'turn' : ''} ${mate.alive ? '' : 'dead'}" style="--pc:${colorOf(mate.id)}" data-act="mate-sheet">
+          <span class="avatar">${esc(mate.name[0].toUpperCase())}</span>
+          <span class="oc-body"><span class="oc-name">${esc(mate.name)} · напарник</span>
+          <span class="oc-meta">${mate.alive ? `<span>✋${mate.handCount}</span><span>баз ${mate.bases.length}</span>${rdy ? '<span class="ok">готов</span>' : ''}${offline ? '<span>офлайн</span>' : ''}` : 'вышел'}</span></span></button>`;
+      } else {
+        const mhand = (mate.hand || []).map((c) => cardHTML(c, { size: 'mini', attrs: 'data-zone="matehand"' })).join('');
+        const mbases = mate.bases.map((b) => cardHTML(b, { size: 'mini', attrs: 'data-zone="matebase"' })).join('');
+        mateHTML = `<div class="opp mate ${(g.active || []).includes(mate.id) ? 'turn' : ''} ${mate.alive ? '' : 'dead'}" style="--pc:${colorOf(mate.id)}">
+          <div class="opp-head"><span class="avatar">${esc(mate.name[0].toUpperCase())}</span>
+            <div class="opp-nm"><b>${esc(mate.name)}</b> <span class="tag-s">напарник</span>${rdy ? ' <span class="tag-s ok">готов</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div></div>
+          ${mate.alive ? `<div class="opp-meta"><span>колода ${mate.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${mate.id}">сброс ${mate.discard.length}</button></div>
+          <div class="zl">Рука</div><div class="opp-bases">${mhand || '<span class="none">пусто</span>'}</div>
+          <div class="zl">Базы</div><div class="opp-bases">${mbases || '<span class="none">нет баз</span>'}</div>` : '<div class="muted">вышел из игры</div>'}
+        </div>`;
+      }
+    }
 
     // торговый ряд
     const cs = mobile ? 'mini' : 'md';
@@ -518,13 +582,14 @@
       : '';
 
     // сыгранное
-    const isMe = cur && cur.id === S.pid;
+    const isMe = myTurn;
     const ps = mobile ? 'mini' : 'sm';
-    const playHTML = cur.inPlay.map((c) => {
+    const playHTML = C.actives.map((pp) => pp.inPlay.map((c) => {
       const d = CARDS[c.copied || c.cid];
-      const acts = isMe && myTurn && !blocked && d.scrap.length ? `<button class="mini-btn" data-act="scrap" data-uid="${c.uid}">Утилизировать</button>` : '';
-      return cardHTML(c, { size: ps, actions: acts, attrs: 'data-zone="play"', undo: isMe && myTurn && (g.undoable || []).includes(c.uid) });
-    }).join('');
+      const mine = pp.id === S.pid;
+      const acts = mine && myTurn && !blocked && d.scrap.length ? `<button class="mini-btn" data-act="scrap" data-uid="${c.uid}">Утилизировать</button>` : '';
+      return cardHTML(c, { size: ps, actions: acts, attrs: `data-zone="${mine ? 'play' : 'mateplay'}"`, undo: mine && myTurn && (g.undoable || []).includes(c.uid), badge: teams && !mine ? `<span class="owner-tag">${esc(pp.name)}</span>` : '' });
+    }).join('')).join('');
 
     // моя зона
     let mineHTML = '', basesZone = '';
@@ -546,48 +611,49 @@
         <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
         <section class="actionbar ${myTurn ? 'my-turn' : ''}" style="--pc:${colorOf(me.id)}">
           <div class="stats">
-            <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="Ваше здоровье">${I.auth}<b>${Math.max(0, me.authority)}</b><small>здоровье</small></div>
+            <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="${teams ? 'Здоровье команды' : 'Ваше здоровье'}">${I.auth}<b>${Math.max(0, me.authority)}</b><small>${teams ? 'команда' : 'здоровье'}</small></div>
             <div class="stat" title="Деньги на этот ход">${I.trade}<b>${myTurn ? trade : 0}</b><small>деньги</small></div>
             <div class="stat" title="Урон на этот ход">${I.combat}<b>${myTurn ? combat : 0}</b><small>урон</small></div>
             <button class="stat pile" data-act="view-deck" title="Колода">${I.draw}<b>${me.deckCount}</b><small>колода</small></button>
             <button class="stat pile" data-act="view-discard" data-pid="${me.id}" title="Сброс">${top ? '▤' : '▢'}<b>${me.discard.length}</b><small>сброс</small></button>
           </div>
           <div class="acts">
-            ${myTurn ? `<button class="btn" data-act="playall" ${blocked || !me.hand.length ? 'disabled' : ''}>Сыграть все</button>
+            ${myTurn && C.ready ? `<span class="wait">Ждём напарника${mate ? ` (${esc(mate.name)})` : ''}…</span><button class="btn" data-act="unready">Ещё не готов</button>`
+              : myTurn ? `<button class="btn" data-act="playall" ${blocked || !me.hand.length ? 'disabled' : ''}>Сыграть все</button>
               <button class="btn primary ${tip.cue === 'end' ? 'cue-btn' : ''}" data-act="endturn" ${blocked ? 'disabled' : ''}>Завершить ход</button>`
               : g.over ? '<button class="btn primary" data-act="show-go">Итоги партии</button>'
-              : `<span class="wait">Ходит <b style="color:${colorOf(g.turn)}">${esc(cur.name)}</b></span>`}
+              : `<span class="wait">Ходит <b style="color:${colorOf(cur.id)}">${C.curName}</b></span>`}
           </div>
         </section>`;
     } else {
       mineHTML = '<div class="hint">Вы наблюдаете за партией.</div>';
     }
 
-    const turnLbl = g.over ? 'Партия окончена' : myTurn ? 'Ваш ход' : `Ходит ${esc(cur.name)}`;
+    const turnLbl = g.over ? 'Партия окончена' : myTurn ? (teams && mate && mate.alive ? `Ваш ход · напарник: ${esc(mate.name)}` : 'Ваш ход') : `Ходит ${C.curName}`;
     $('#board').innerHTML = `
       <header class="topbar">
         <div class="brand">Звёздные Державы <span>стол ${r.code}</span></div>
-        <div class="turn-pill ${myTurn ? 'mine' : ''}" style="--pc:${colorOf(g.turn)}">${turnLbl}</div>
+        <div class="turn-pill ${myTurn ? 'mine' : ''}" style="--pc:${colorOf(cur.id)}">${turnLbl}</div>
         <div class="tb-btns">
           <button class="btn sm ghost" data-act="rules">Правила</button>
           <button class="btn sm ghost" data-act="menu">Меню</button>
           <button class="btn sm ghost side-toggle" data-act="toggle-side">Журнал${S.unread ? ` <span class="unread">${S.unread}</span>` : ''}</button>
         </div>
       </header>
-      ${mqWide.matches ? '' : `<section class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}</section>`}
+      ${mqWide.matches ? '' : `<section class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${mateHTML}${oppHTML}</section>`}
       <section class="zone market ${tip.cue === 'market' ? 'cue' : ''}">
         <div class="zl">Торговый ряд <span class="muted">· в колоде ${g.tradeDeckCount}</span></div>
         <div class="strip">${rowHTML}${expHTML}</div>
       </section>
-      <div class="table-row"><section class="zone play-zone" style="--pc:${colorOf(g.turn)}">
-        <div class="zl">${isMe ? 'Вы сыграли' : `Сыграно: ${esc(cur.name)}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
+      <div class="table-row"><section class="zone play-zone" style="--pc:${colorOf(cur.id)}">
+        <div class="zl">${isMe ? (teams ? 'Сыграно вашей командой' : 'Вы сыграли') : `Сыграно: ${C.curName}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
         <div class="strip">${playHTML || '<span class="none">Пока ничего</span>'}</div>
       </section>${basesZone}</div>
       ${mineHTML}
       ${g.prompt && g.prompt.waiting ? `<div class="waiting-banner">${esc(g.prompt.text)}</div>` : ''}`;
 
     S.prevAuth = Object.fromEntries(g.players.map((p) => [p.id, p.authority]));
-    $('#side-opps').innerHTML = mqWide.matches ? `<div class="zl">Соперники</div><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}</div>` : '';
+    $('#side-opps').innerHTML = mqWide.matches ? `${mateHTML ? `<div class="zl">Напарник</div><div class="opps">${mateHTML}</div>` : ''}<div class="zl">Соперники</div><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}</div>` : '';
 
     const logEl = $('#side-log');
     logEl.innerHTML = g.log.map((l) => `<div class="le ${l.kind || ''}">${esc(l.text)}</div>`).join('');
@@ -607,6 +673,8 @@
 
     // если открыт лист соперника — обновить
     if (S.modal === 'opp' && S.oppSheet) oppSheet(S.oppSheet, true);
+    if (S.modal === 'mate') mateSheet(true);
+    if (S.modal === 'admin') adminPanel(true);
   }
 
   function flashTurn() {
@@ -650,8 +718,11 @@
   function renderGameOver(g, host) {
     const ranked = [...g.players].sort((a, b) => (a.place || 99) - (b.place || 99));
     const win = g.players.find((p) => p.id === g.winner);
+    const ws = (g.winners || []).map((id) => g.players.find((p) => p.id === id)).filter(Boolean);
+    let title = win ? (win.id === S.pid ? 'Вы победили' : `Победил ${esc(win.name)}`) : 'Ничья';
+    if (g.mode === 'teams' && ws.length) title = ws.some((p) => p.id === S.pid) ? 'Ваша команда победила' : `Победила команда ${ws.map((p) => esc(p.name)).join(' и ')}`;
     openModal(`<div class="go"><div class="sec-title">Партия окончена</div>
-      <h2>${win ? (win.id === S.pid ? 'Вы победили' : `Победил ${esc(win.name)}`) : 'Ничья'}</h2>
+      <h2>${title}</h2>
       <ol class="go-list">${ranked.map((p) => `<li><b>${esc(p.name)}</b><span>${p.place ? p.place + ' место' : ''}</span></li>`).join('')}</ol>
       <div class="m-actions center">${host ? '<button class="btn primary big" data-act="tolobby">Новая партия</button>' : '<span class="muted">Новую партию начинает хост</span>'}
       <button class="btn ghost" data-act="close-modal">Посмотреть стол</button><button class="btn ghost" data-act="leave">Выйти</button></div></div>`, { kind: 'gameover' });
@@ -700,11 +771,72 @@
     }).join('');
     const html = `<h3>${esc(p.name)}</h3>
       <div class="os-stats"><span>${I.auth} здоровье <b>${Math.max(0, p.authority)}</b></span><span>в руке ${p.handCount}</span><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button></div>
-      ${C.hasOutpost(p) ? '<p class="muted">Защищён аванпостом: сначала уничтожьте аванпост, потом можно атаковать игрока и другие базы.</p>' : ''}
+      ${C.hasOutpost(p) ? `<p class="muted">Защищён аванпостом${C.teams ? ' команды' : ''}: сначала уничтожьте аванпост, потом можно атаковать ${C.teams ? 'команду' : 'игрока'} и другие базы.</p>` : ''}
       <div class="sec-title">Базы</div><div class="ob-grid">${bases || '<span class="none">Нет баз</span>'}</div>
       ${canAtk ? `<div class="m-actions"><button class="btn danger big" data-act="atkplayer" data-target="${p.id}">Атаковать (${C.g.pool.combat} урона)</button></div>` : ''}`;
     if (refresh && $('.modal.opp-modal')) { $('.modal.opp-modal').innerHTML = '<button class="x" data-act="close-modal">×</button>' + html; return; }
     openModal(html, { kind: 'opp', cls: 'opp-modal', sheet: true });
+  }
+
+  function showDeck() {
+    const me = S.room.game.players.find((p) => p.id === S.pid);
+    const list = me.deckList || [];
+    const counts = {};
+    for (const cid of list) counts[cid] = (counts[cid] || 0) + 1;
+    const ids = Object.keys(counts).sort((a, b) => (CARDS[b].cost - CARDS[a].cost) || CARDS[a].name.localeCompare(CARDS[b].name));
+    openModal(`<h3>Ваша колода — ${cardsWord(list.length)}</h3>
+      <p class="muted">Показан состав колоды без порядка — какая карта придёт следующей, не видно. Сыгранные и купленные в этот ход карты лежат в сбросе.</p>
+      <div class="pick-grid">${ids.map((cid) => `<div class="pick">${cardHTML({ cid }, { size: 'sm', badge: counts[cid] > 1 ? `<span class="count-badge">×${counts[cid]}</span>` : '' })}</div>`).join('') || '<div class="empty">Колода пуста — при следующем доборе перемешается сброс.</div>'}</div>`, { kind: 'deck', cls: 'wide', sheet: isMobile() });
+  }
+
+  function mateSheet(refresh) {
+    const C = ctx();
+    const p = C.mate;
+    if (!p) return;
+    const hand = (p.hand || []).map((c) => cardHTML(c, { size: 'sm', attrs: 'data-zone="matehand"' })).join('');
+    const bases = p.bases.map((b) => cardHTML(b, { size: 'sm', attrs: 'data-zone="matebase"' })).join('');
+    const html = `<h3>${esc(p.name)} — напарник</h3>
+      <div class="os-stats"><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>${(C.g.ready || []).includes(p.id) ? '<span class="ok">готов завершить ход</span>' : ''}</div>
+      <div class="sec-title">Рука</div><div class="ob-grid">${hand || '<span class="none">Пусто</span>'}</div>
+      <div class="sec-title">Базы</div><div class="ob-grid">${bases || '<span class="none">Нет баз</span>'}</div>`;
+    if (refresh && $('.modal.opp-modal')) { $('.modal.opp-modal').innerHTML = '<button class="x" data-act="close-modal">×</button>' + html; return; }
+    openModal(html, { kind: 'mate', cls: 'opp-modal', sheet: true });
+  }
+
+  function adminLogin() {
+    openModal(`<h3>Режим админа</h3><p class="muted">Для проверок: меняет ваши здоровье, деньги и урон.</p>
+      <form id="adm-form" class="adm-form"><input id="adm-pass" type="password" autocomplete="current-password" placeholder="Пароль"><button class="btn primary">Войти</button></form>`, { kind: 'admin-login' });
+    const f = $('#adm-form');
+    f.addEventListener('submit', (e) => { e.preventDefault(); send({ t: 'adminLogin', password: $('#adm-pass').value }); });
+    setTimeout(() => $('#adm-pass') && $('#adm-pass').focus(), 50);
+  }
+
+  function adminPanel(refresh) {
+    const g = S.room && S.room.game;
+    if (!g) { closeModal(); toast('Режим админа включён — значения можно менять во время партии'); return; }
+    const C = ctx();
+    if (!C.me) return;
+    if (refresh) { const el = $('#adm-turn'); if (el) el.textContent = C.myTurn ? '' : 'Деньги и урон можно менять только в свой ход.'; return; }
+    const num = (id, label, val, dis) => `<label class="adm-row"><span>${label}</span><span class="stepper sm"><button type="button" class="btn" data-adm="${id}" data-d="-1" ${dis ? 'disabled' : ''}>−</button><input id="${id}" type="number" min="0" max="9999" value="${val}" ${dis ? 'disabled' : ''}><button type="button" class="btn" data-adm="${id}" data-d="1" ${dis ? 'disabled' : ''}>+</button></span></label>`;
+    openModal(`<h3>Режим админа</h3>
+      <form id="adm-set" class="adm-set">
+        ${num('adm-hp', C.teams ? 'Здоровье команды' : 'Здоровье', C.me.authority, false)}
+        ${num('adm-trade', 'Деньги', C.myTurn ? C.g.pool.trade : 0, !C.myTurn)}
+        ${num('adm-combat', 'Урон', C.myTurn ? C.g.pool.combat : 0, !C.myTurn)}
+        <p class="muted small" id="adm-turn">${C.myTurn ? '' : 'Деньги и урон можно менять только в свой ход.'}</p>
+        <div class="m-actions"><button type="button" class="btn" data-act="close-modal">Закрыть</button><button class="btn primary">Применить</button></div>
+      </form>`, { kind: 'admin' });
+    $('#adm-set').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-adm]'); if (!b) return;
+      const inp = $('#' + b.dataset.adm); inp.value = Math.max(0, (+inp.value || 0) + (+b.dataset.d));
+    });
+    $('#adm-set').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = { hp: +$('#adm-hp').value };
+      if (!$('#adm-trade').disabled) { v.trade = +$('#adm-trade').value; v.combat = +$('#adm-combat').value; }
+      send({ t: 'adminSet', values: v });
+      toast('Значения изменены');
+    });
   }
 
   function showDiscard(pid) {
@@ -735,10 +867,12 @@
     if (me.hand.length) warn.push(`в руке осталось ${cardsWord(me.hand.length)}`);
     const unused = me.bases.filter((b) => CARDS[b.cid].primary.length && !(b.used && b.used.primary));
     if (unused.length) warn.push(`не использованы базы: ${unused.map((b) => '«' + CARDS[b.cid].name + '»').join(', ')}`);
-    if (g.pool.combat > 0 && g.players.some((p) => p.alive && p.id !== S.pid)) warn.push(`не потрачен урон (${g.pool.combat})`);
+    const C = ctx();
+    if (g.pool.combat > 0 && g.players.some((p) => p.alive && C.isEnemy(p))) warn.push(`не потрачен урон (${g.pool.combat})`);
+    if (C.teams && C.mate && C.mate.alive) warn.push(`ход перейдёт, когда ${C.mate.name} тоже нажмёт «Завершить ход»`);
     const cheapest = Math.min(...g.row.filter(Boolean).map((c) => CARDS[c.cid].cost), g.explorers ? 2 : 99);
     if (g.pool.trade >= cheapest) warn.push(`остались деньги (${g.pool.trade}) — можно купить карту`);
-    if (!warn.length) return act({ type: 'endTurn' });
+    if (!warn.length || (warn.length === 1 && C.teams && C.mate && C.mate.alive)) return act({ type: 'endTurn' });
     confirmBox(`Завершить ход?<small class="warn-list">${warn.map((w) => '• ' + esc(w)).join('<br>')}</small>`, 'Завершить ход', () => act({ type: 'endTurn' }));
   }
 
@@ -749,6 +883,7 @@
       <button class="btn" data-act="toggle-sound">${S.sound ? 'Звук начала хода: включён' : 'Звук начала хода: выключен'}</button>
       <button class="btn" data-act="copy-link">Скопировать ссылку на стол</button>
       <button class="btn" data-act="tutorial">Как сделать ход</button>
+      <button class="btn ghost" data-act="admin">${S.room.admin ? 'Режим админа (включён)' : 'Режим админа'}</button>
       ${me && me.alive && !g.over ? '<button class="btn danger" data-act="forfeit">Сдаться</button>' : ''}
       ${!me || !me.alive || g.over ? '<button class="btn" data-act="leave">Выйти из-за стола</button>' : ''}
     </div>`, { kind: 'menu' });
@@ -789,7 +924,7 @@
       case 'join-code': doJoin(d.code); break;
       case 'leave': closeModal(); send({ t: 'leave' }); break;
       case 'set': {
-        let v = d.v; if (v === 'true') v = true; else if (v === 'false') v = false; else v = +v;
+        let v = d.v; if (v === 'true') v = true; else if (v === 'false') v = false; else if (/^\d+$/.test(v) && d.k !== 'deckSize') v = +v;
         send({ t: 'settings', settings: { ...S.room.settings, [d.k]: v } });
         break;
       }
@@ -817,7 +952,11 @@
       case 'opp-sheet': oppSheet(d.pid); break;
       case 'endturn': endTurnCheck(); break;
       case 'view-discard': showDiscard(d.pid); break;
-      case 'view-deck': toast(`В колоде ${cardsWord(S.room.game.players.find((p) => p.id === S.pid).deckCount)}. Порядок карт скрыт.`); break;
+      case 'view-deck': showDeck(); break;
+      case 'mate-sheet': mateSheet(); break;
+      case 'unready': act({ type: 'unready' }); break;
+      case 'team': send({ t: 'team', pid: d.pid, team: d.team }); break;
+      case 'admin': if (S.room.admin) adminPanel(); else adminLogin(); break;
       case 'choose': answered(); act({ type: 'answer', option: +d.i }); break;
       case 'opp': answered(); act({ type: 'answer', target: d.target }); break;
       case 'pick': {
@@ -880,6 +1019,9 @@
     document.addEventListener('touchmove', cancel, { passive: true });
   }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.modal && S.modal !== 'prompt') closeModal(); });
+
+  // бесплатный сервер засыпает через 15 минут без запросов — пока вы за столом, страница его будит
+  setInterval(() => { if (S.room) fetch('/health', { cache: 'no-store' }).catch(() => {}); }, 4 * 60 * 1000);
 
   connect();
 })();

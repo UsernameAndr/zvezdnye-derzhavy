@@ -29,7 +29,17 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server });
+// Сжатие сообщений: трафик меньше примерно в 7 раз
+const wss = new WebSocketServer({ server, perMessageDeflate: { threshold: 512, zlibDeflateOptions: { level: 6 }, serverNoContextTakeover: false, clientNoContextTakeover: true } });
+
+// Режим админа: пароль задаётся переменной окружения ADMIN_PASSWORD (в коде его нет)
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+function passwordOk(p) {
+  if (!ADMIN_PASSWORD) return false;
+  const a = crypto.createHash('sha256').update(String(p)).digest();
+  const b = crypto.createHash('sha256').update(ADMIN_PASSWORD).digest();
+  return crypto.timingSafeEqual(a, b);
+}
 
 // token -> session {token, pid, name, ws, room}
 const sessions = new Map();
@@ -52,10 +62,12 @@ function roomView(room, pid) {
     code: room.code,
     hostId: room.hostId,
     settings: room.settings,
+    teams: room.teams,
     members: room.members.map((id) => {
       const s = byPid.get(id);
       return { id, name: s ? s.name : '???', connected: !!(s && s.ws) };
     }),
+    admin: !!(byPid.get(pid) || {}).admin,
     chat: room.chat.slice(-60),
     game: room.game ? room.game.view(pid) : null,
     you: pid,
@@ -79,6 +91,7 @@ function roomList() {
       count: r.members.length,
       max: r.settings.maxPlayers,
       authority: r.settings.authority,
+      mode: r.settings.mode,
     }));
 }
 function broadcastList() {
@@ -92,12 +105,18 @@ function leaveRoom(s) {
   if (!room) return;
   if (room.game && !room.game.over) room.game.forfeit(s.pid);
   room.members = room.members.filter((id) => id !== s.pid);
+  delete room.teams[s.pid];
   if (!room.members.length) { rooms.delete(room.code); broadcastList(); return; }
   if (room.hostId === s.pid) room.hostId = room.members[0];
   broadcastRoom(room);
   broadcastList();
 }
 
+function smallerTeam(room) {
+  const a = room.members.filter((id) => room.teams[id] === 'A').length;
+  const b = room.members.filter((id) => room.teams[id] === 'B').length;
+  return a <= b ? 'A' : 'B';
+}
 const clampInt = (v, lo, hi, d) => { v = Math.floor(Number(v)); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
 
 const handlers = {
@@ -122,8 +141,8 @@ const handlers = {
     if (s.room) leaveRoom(s);
     const code = newCode();
     const room = {
-      code, hostId: s.pid, members: [s.pid], game: null, chat: [],
-      settings: { authority: 50, maxPlayers: 4, randomOrder: true },
+      code, hostId: s.pid, members: [s.pid], game: null, chat: [], teams: { [s.pid]: 'A' },
+      settings: { authority: 50, maxPlayers: 4, randomOrder: true, mode: 'ffa', deckSize: 'auto' },
       lastActive: Date.now(),
     };
     rooms.set(code, room);
@@ -143,6 +162,7 @@ const handlers = {
     if (room.members.length >= room.settings.maxPlayers) throw new GameError('Стол заполнен');
     if (s.room && s.room !== code) leaveRoom(s);
     room.members.push(s.pid);
+    room.teams[s.pid] = smallerTeam(room);
     s.room = code;
     room.chat.push({ sys: true, text: `${s.name} садится за стол` });
     broadcastRoom(room);
@@ -160,10 +180,14 @@ const handlers = {
     if (room.hostId !== s.pid) throw new GameError('Настройки меняет только хост');
     if (room.game) throw new GameError('Игра уже идёт');
     const st = m.settings || {};
+    const mode = st.mode === 'teams' || st.mode === 'ffa' ? st.mode : room.settings.mode;
+    if (mode === 'teams' && room.members.length > 4) throw new GameError('Для режима 2 на 2 за столом должно быть не больше 4 игроков');
     room.settings = {
       authority: clampInt(st.authority, 1, 999, room.settings.authority),
-      maxPlayers: Math.max(room.members.length, clampInt(st.maxPlayers, 2, 6, room.settings.maxPlayers)),
+      maxPlayers: mode === 'teams' ? 4 : Math.max(room.members.length, clampInt(st.maxPlayers, 2, 6, room.settings.maxPlayers)),
       randomOrder: st.randomOrder === undefined ? room.settings.randomOrder : !!st.randomOrder,
+      mode,
+      deckSize: ['auto', '1', '1.5', '2'].includes(String(st.deckSize)) ? String(st.deckSize) : room.settings.deckSize,
     };
     broadcastRoom(room);
     broadcastList();
@@ -175,7 +199,11 @@ const handlers = {
     if (room.game && !room.game.over) throw new GameError('Игра уже идёт');
     if (room.members.length < 2) throw new GameError('Нужно минимум 2 игрока');
     if (room.members.length > 6) throw new GameError('Максимум 6 игроков');
-    room.game = new Game(room.members.map((id) => ({ id, name: byPid.get(id).name })), room.settings);
+    if (room.settings.mode === 'teams') {
+      const a = room.members.filter((id) => room.teams[id] === 'A').length;
+      if (room.members.length !== 4 || a !== 2) throw new GameError('Для режима 2 на 2 нужно 4 игрока: по двое в каждой команде');
+    }
+    room.game = new Game(room.members.map((id) => ({ id, name: byPid.get(id).name, team: room.teams[id] })), room.settings);
     broadcastRoom(room);
     broadcastList();
   },
@@ -215,6 +243,33 @@ const handlers = {
     if (!room.members.includes(room.hostId)) room.hostId = room.members[0];
     broadcastRoom(room);
     broadcastList();
+  },
+  team(s, m) {
+    const room = rooms.get(s.room);
+    if (!room || room.game) return;
+    const pid = m.pid && room.hostId === s.pid ? m.pid : s.pid;
+    if (!room.members.includes(pid)) return;
+    room.teams[pid] = m.team === 'B' ? 'B' : 'A';
+    broadcastRoom(room);
+  },
+  adminLogin(s, m, ws) {
+    const now = Date.now();
+    s.adminTries = (s.adminTries || []).filter((t) => now - t < 60_000);
+    if (s.adminTries.length >= 5) throw new GameError('Слишком много попыток — подождите минуту');
+    s.adminTries.push(now);
+    if (!ADMIN_PASSWORD) throw new GameError('Режим админа не настроен на сервере');
+    if (!passwordOk(m.password)) throw new GameError('Неверный пароль');
+    s.admin = true;
+    send(ws, { t: 'admin', ok: true });
+    const room = rooms.get(s.room);
+    if (room) broadcastRoom(room);
+  },
+  adminSet(s, m) {
+    if (!s.admin) throw new GameError('Нет доступа');
+    const room = rooms.get(s.room);
+    if (!room || !room.game || room.game.over) throw new GameError('Игра не идёт');
+    room.game.adminSet(s.pid, m.values || {});
+    broadcastRoom(room);
   },
   chat(s, m) {
     const room = rooms.get(s.room);

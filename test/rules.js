@@ -137,7 +137,7 @@ t('сыгранную карту можно вернуть в руку', () => {
   g.act('p0', { type: 'playAll' });
   assert.equal(g.pool.combat, 1);
   assert.equal(p.bases.length, 1);
-  assert.deepEqual(g.undoable().sort(), ids.slice().sort());
+  assert.deepEqual(g.undoable('p0').sort(), ids.slice().sort());
   // вернуть вторую карту — вернутся она и все сыгранные после неё
   g.act('p0', { type: 'undo', uid: ids[1] });
   const me = g.cur();
@@ -145,20 +145,20 @@ t('сыгранную карту можно вернуть в руку', () => {
   assert.equal(me.bases.length, 0);
   assert.equal(g.pool.trade, 0);
   assert.equal(g.pool.combat, 1);
-  assert.deepEqual(g.undoable(), [ids[0]]);
+  assert.deepEqual(g.undoable('p0'), [ids[0]]);
 });
 
 t('нельзя вернуть карту, если она открыла новые карты', () => {
   const { g, p } = setup(2, ['e_corvette', 'scout']);
   g.act('p0', { type: 'play', uid: p.hand[0].uid }); // берёт карту
-  assert.deepEqual(g.undoable(), []);
+  assert.deepEqual(g.undoable('p0'), []);
 });
 
 t('после покупки вернуть карту нельзя', () => {
   const { g, p } = setup(2, ['scout', 'scout']);
   g.act('p0', { type: 'playAll' });
   g.act('p0', { type: 'buy', slot: 'explorer' });
-  assert.deepEqual(g.undoable(), []);
+  assert.deepEqual(g.undoable('p0'), []);
   assert.throws(() => g.act('p0', { type: 'undo', uid: 'x' }), /нельзя/);
 });
 
@@ -170,4 +170,123 @@ t('выбор можно отменить, вернув карту', () => {
   g.act('p0', { type: 'undo', uid });
   assert.equal(g.prompt, null);
   assert.equal(g.cur().hand.length, 1);
+});
+
+// ── режим 2 на 2 ──
+function teams() {
+  const g = new Game([
+    { id: 'a1', name: 'A1', team: 'A' }, { id: 'b1', name: 'B1', team: 'B' },
+    { id: 'a2', name: 'A2', team: 'A' }, { id: 'b2', name: 'B2', team: 'B' },
+  ], { authority: 75, randomOrder: false, mode: 'teams' });
+  for (const p of g.players) { p.discard.push(...p.hand); p.hand = []; }
+  g.pool = { trade: 0, combat: 0 };
+  return g;
+}
+
+t('2×2: ходят оба напарника, деньги и урон общие', () => {
+  const g = teams();
+  assert.deepEqual(g.active().map((p) => p.id).sort(), ['a1', 'a2']);
+  g.pl('a1').hand = [c('scout')]; g.pl('a2').hand = [c('viper')];
+  g.act('a1', { type: 'playAll' }); g.act('a2', { type: 'playAll' });
+  assert.deepEqual(g.pool, { trade: 1, combat: 1 });
+  assert.throws(() => g.act('b1', { type: 'endTurn' }), /не ваш ход/);
+});
+
+t('2×2: ход переходит, только когда готовы оба', () => {
+  const g = teams();
+  g.act('a1', { type: 'endTurn' });
+  assert.ok(g.isActive('a2'));
+  g.act('a2', { type: 'endTurn' });
+  assert.deepEqual(g.active().map((p) => p.id).sort(), ['b1', 'b2']);
+});
+
+t('2×2: здоровье общее, напарника атаковать нельзя', () => {
+  const g = teams();
+  g.pool.combat = 10;
+  g.act('a1', { type: 'attackPlayer', target: 'b2', amount: 10 });
+  assert.equal(g.pl('b1').authority, 65);
+  assert.equal(g.pl('b2').authority, 65);
+  g.pool.combat = 5;
+  assert.throws(() => g.act('a1', { type: 'attackPlayer', target: 'a2', amount: 5 }), /Неверная цель/);
+});
+
+t('2×2: аванпост одного защищает всю команду', () => {
+  const g = teams();
+  g.pl('b1').bases.push(c('t_post'));
+  g.pl('b2').bases.push(c('b_hive'));
+  g.pool.combat = 20;
+  assert.throws(() => g.act('a1', { type: 'attackPlayer', target: 'b2', amount: 5 }), /аванпост/);
+  assert.throws(() => g.act('a1', { type: 'attackBase', target: 'b2', uid: g.pl('b2').bases[0].uid }), /аванпост/);
+});
+
+t('2×2: союз срабатывает от карты напарника', () => {
+  const g = teams();
+  g.pl('a1').hand = [c('b_fighter')]; g.pl('a2').hand = [c('b_tradepod')];
+  g.act('a1', { type: 'playAll' });
+  const h = g.pl('a1').hand.length;
+  g.act('a2', { type: 'playAll' });
+  assert.equal(g.pool.combat, 3 + 2);   // жалохват 3 + союз спороносца 2
+  assert.equal(g.pl('a1').hand.length, h + 1); // союз жалохвата: a1 берёт карту
+});
+
+t('2×2: пока напарник выбирает, второй ждёт; напарник видит руку', () => {
+  const g = teams();
+  g.pl('a1').hand = [c('m_patrol')]; g.pl('a2').hand = [c('scout')];
+  g.act('a1', { type: 'playAll' });
+  assert.equal(g.prompt.pid, 'a1');
+  assert.throws(() => g.act('a2', { type: 'playAll' }), /Напарник/);
+  assert.ok(g.view('a2').players.find((p) => p.id === 'a1').hand);
+  assert.equal(g.view('b1').players.find((p) => p.id === 'a1').hand, null);
+});
+
+t('2×2: команда выбывает целиком, победа команды', () => {
+  const g = teams();
+  g.pool.combat = 100;
+  g.act('a2', { type: 'attackPlayer', target: 'b1', amount: 80 });
+  assert.equal(g.over, true);
+  assert.deepEqual(g.winners.sort(), ['a1', 'a2']);
+  assert.ok(!g.pl('b1').alive && !g.pl('b2').alive);
+});
+
+t('2×2: вернуть карту нельзя, если после неё играл напарник', () => {
+  const g = teams();
+  g.pl('a1').hand = [c('scout')]; g.pl('a2').hand = [c('viper')];
+  g.act('a1', { type: 'playAll' });
+  const u = g.pl('a1').inPlay[0].uid;
+  assert.deepEqual(g.undoable('a1'), [u]);
+  g.act('a2', { type: 'playAll' });
+  assert.deepEqual(g.undoable('a1'), []);
+  assert.equal(g.undoable('a2').length, 1);
+});
+
+t('размер торговой колоды: 80 / 1.5× / 2× и авто', () => {
+  const mk = (n, deckSize) => new Game(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'x' })), { deckSize });
+  const total = (g) => g.tradeDeck.length + g.row.filter(Boolean).length;
+  assert.equal(total(mk(2, '1')), 80);
+  assert.equal(total(mk(2, '2')), 160);
+  assert.equal(total(mk(2, '1.5')), 120);
+  assert.equal(total(mk(2, 'auto')), 80);
+  assert.equal(total(mk(6, 'auto')), 160);
+  assert.equal(mk(6, 'auto').explorers, 20);
+});
+
+t('своя колода видна без порядка, чужая — нет', () => {
+  const { g } = setup();
+  const v = g.view('p0');
+  const mine = v.players.find((p) => p.id === 'p0');
+  assert.deepEqual(mine.deckList, mine.deckList.slice().sort());
+  assert.equal(mine.deckList.length, mine.deckCount);
+  assert.equal(v.players.find((p) => p.id === 'p1').deckList, null);
+});
+
+t('админ меняет здоровье, деньги и урон без записи в журнал', () => {
+  const { g } = setup();
+  const logLen = g.log.length;
+  g.adminSet('p0', { hp: 99, trade: 7, combat: 12 });
+  assert.equal(g.pl('p0').authority, 99);
+  assert.deepEqual(g.pool, { trade: 7, combat: 12 });
+  g.adminSet('p1', { hp: 5, trade: 100 });     // не его ход — деньги не меняются
+  assert.equal(g.pl('p1').authority, 5);
+  assert.equal(g.pool.trade, 7);
+  assert.equal(g.log.length, logLen);
 });

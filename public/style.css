@@ -389,3 +389,28 @@ button.stat:hover { border-color: #4a5870; }
   .choice { min-width: 120px; padding: 12px 14px; font-size: 14px; }
 }
 
+
+/* ── режим 2 на 2, колода, админ ── */
+.team-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.team-col { display: flex; flex-direction: column; gap: 6px; border-top: 2px solid var(--tc); padding-top: 6px; }
+.team-h { font-weight: 600; font-size: 13px; color: var(--tc); }
+.team-col .l-player { flex-wrap: wrap; }
+.set-note { margin: 6px 0 0; }
+.owner-tag { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; background: rgba(5, 7, 12, .88); color: var(--muted); font-size: 10px; text-align: center; padding: 1px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.count-badge { position: absolute; bottom: 4px; right: 4px; z-index: 2; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px; padding: 1px 7px; border-radius: 4px; }
+.opp.mate { border-style: dashed; border-top-style: solid; }
+.opp.mate .zl { margin: 2px 0 0; }
+.ok, .tag-s.ok { color: #9fe3c8; border-color: #2b6b57; }
+.oc-meta .ok { font-weight: 600; }
+.opp-chip.mate { border-style: dashed; border-top-style: solid; }
+.adm-form { display: flex; gap: 8px; }
+.adm-form input { flex: 1; min-width: 0; }
+.adm-set { display: flex; flex-direction: column; gap: 10px; }
+.adm-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 600; }
+.stepper.sm { margin: 0; }
+.stepper.sm input { width: 84px; font-size: 18px; padding: 6px; }
+.stepper.sm .btn { padding: 6px 12px; }
+@media (max-width: 760px) {
+  .team-cols { grid-template-columns: 1fr; }
+  .owner-tag { font-size: 8.5px; }
+}

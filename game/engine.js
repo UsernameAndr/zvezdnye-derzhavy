@@ -2,6 +2,11 @@
 /* Движок правил. Сервер — единственный источник правды: клиенты присылают действия,
  * движок проверяет их и меняет состояние. Каждый игрок получает свою «проекцию»
  * состояния (чужие руки скрыты).
+ *
+ * Режимы:
+ *  - ffa   — каждый сам за себя (команда = сам игрок);
+ *  - teams — 2 на 2: у команды общее здоровье, напарники ходят одновременно,
+ *            делят деньги и урон, союзные способности срабатывают и от карт напарника.
  */
 const { CARDS } = require('../public/cards.js');
 
@@ -33,22 +38,51 @@ function plural(n, one, few, many) {
 }
 const cardsWord = (n) => `${n} ${plural(n, 'карту', 'карты', 'карт')}`;
 
+// Множитель размера торговой колоды
+function deckMult(setting, nPlayers) {
+  if (setting === 'auto' || setting === undefined) return nPlayers >= 5 ? 2 : nPlayers === 4 ? 1.5 : 1;
+  const m = Number(setting);
+  return [1, 1.5, 2].includes(m) ? m : 1;
+}
+// Состав торговой колоды: целые копии набора + для «полуторной» — по половине карт каждой фракции
+function buildTradeDeck(mult) {
+  const set = [];
+  for (const c of Object.values(CARDS)) for (let i = 0; i < c.count; i++) set.push(c.id);
+  const out = [];
+  for (let k = 0; k < Math.floor(mult); k++) out.push(...set);
+  if (mult % 1) {
+    const byF = {};
+    for (const id of set) (byF[CARDS[id].faction] = byF[CARDS[id].faction] || []).push(id);
+    for (const ids of Object.values(byF)) out.push(...shuffle(ids.slice()).slice(0, Math.round(ids.length * (mult % 1))));
+  }
+  return out;
+}
+function tradeDeckSize(mult) { return buildTradeDeck(mult).length; }
+
 class Game {
   constructor(players, settings) {
-    this.settings = Object.assign({ authority: 50, randomOrder: true }, settings);
-    const order = this.settings.randomOrder ? shuffle(players.slice()) : players.slice();
+    this.settings = Object.assign({ authority: 50, randomOrder: true, mode: 'ffa', deckSize: 'auto' }, settings);
+    this.mode = this.settings.mode === 'teams' ? 'teams' : 'ffa';
+    let order = this.settings.randomOrder ? shuffle(players.slice()) : players.slice();
     this.players = order.map((p) => ({
       id: p.id, name: p.name, authority: this.settings.authority,
+      team: this.mode === 'teams' ? (p.team === 'B' ? 'B' : 'A') : p.id,
       deck: [], hand: [], discard: [], inPlay: [], bases: [],
       pendingDiscard: 0, alive: true, place: null,
     }));
+    // порядок ходов — по командам (в ffa команда = игрок)
+    this.teamOrder = [];
+    for (const p of this.players) if (!this.teamOrder.includes(p.team)) this.teamOrder.push(p.team);
 
+    const mult = deckMult(this.settings.deckSize, this.players.length);
+    this.deckMult = mult;
     this.tradeDeck = [];
-    for (const c of Object.values(CARDS)) for (let i = 0; i < c.count; i++) this.tradeDeck.push(mk(c.id));
+    for (const id of buildTradeDeck(mult)) this.tradeDeck.push(mk(id));
     shuffle(this.tradeDeck);
     this.row = [];
     for (let i = 0; i < 5; i++) this.row.push(this.tradeDeck.pop() || null);
-    this.explorers = 10;
+    this.explorers = Math.round(10 * mult);
+    this.explorersMax = this.explorers;
 
     this.log = [];
     this.turnIdx = 0;
@@ -60,29 +94,46 @@ class Game {
     this.promptSrc = null;
     this.over = false;
     this.winner = null;
+    this.winners = [];
     this.lastEvent = null;
     this.revealSeq = 0;
     this.undoStack = [];
+    this.ready = {};
+    this.actorId = null;
 
-    // Размер стартовой руки: 2 игрока — 3/5; больше — 3/4/5/5…
+    // Стартовые руки. ffa: 2 игрока — 3/5; больше — 3/4/5/5…  Команды: первая команда по 3, вторая по 5.
     const n = this.players.length;
     this.players.forEach((p, i) => {
       for (let k = 0; k < 8; k++) p.deck.push(mk('scout'));
       for (let k = 0; k < 2; k++) p.deck.push(mk('viper'));
       shuffle(p.deck);
-      const size = n === 2 ? [3, 5][i] : [3, 4, 5, 5, 5, 5][i];
+      let size;
+      if (this.mode === 'teams') size = p.team === this.teamOrder[0] ? 3 : 5;
+      else size = n === 2 ? [3, 5][i] : [3, 4, 5, 5, 5, 5][i];
       this.draw(p, size);
     });
-    this.addLog(`Партия началась! Стартовое здоровье: ${this.settings.authority}. Первым ходит ${this.players[0].name}.`, 'sys');
+    this.revealSeq = 0;
+    const first = this.mode === 'teams' ? `команда ${this.teamNames(this.teamOrder[0])}` : this.players[0].name;
+    this.addLog(`Партия началась! ${this.mode === 'teams' ? 'Режим 2 на 2, здоровье команды' : 'Стартовое здоровье'}: ${this.settings.authority}. Первым ходит ${first}.`, 'sys');
     this.startTurn();
   }
 
   // ── утилиты ──
   addLog(text, kind = '') { this.log.push({ text, kind, t: Date.now() }); if (this.log.length > 300) this.log.shift(); }
-  cur() { return this.players[this.turnIdx]; }
   pl(id) { return this.players.find((p) => p.id === id); }
-  opponents() { const me = this.cur(); return this.players.filter((p) => p.alive && p !== me); }
-  inPlayAll(p = this.cur()) { return [...p.inPlay, ...p.bases]; }
+  curTeam() { return this.teamOrder[this.turnIdx]; }
+  active() { const t = this.curTeam(); return this.players.filter((p) => p.alive && p.team === t); }
+  isActive(pid) { return this.active().some((p) => p.id === pid); }
+  cur() { return this.pl(this.actorId) || this.active()[0]; } // игрок, чьё действие сейчас выполняется
+  teamMembers(team) { return this.players.filter((p) => p.team === team); }
+  teamNames(team) { return this.teamMembers(team).map((p) => p.name).join(' и '); }
+  teamAlive(team) { return this.players.some((p) => p.team === team && p.alive); }
+  opponents(p = this.cur()) { return this.players.filter((o) => o.alive && o.team !== p.team); }
+  teamHasOutpost(team) { return this.players.some((o) => o.team === team && o.bases.some((b) => def(b).outpost)); }
+  inPlayAll() { const r = []; for (const p of this.active()) r.push(...p.inPlay, ...p.bases); return r; }
+  ownerOf(card) { return this.active().find((p) => p.inPlay.includes(card) || p.bases.includes(card)); }
+  changeHp(p, d) { for (const m of this.teamMembers(p.team)) m.authority += d; }
+  who(p) { return this.mode === 'teams' ? `команда ${this.teamNames(p.team)}` : p.name; }
 
   factions(c) {
     const s = new Set([def(c).faction]);
@@ -106,6 +157,7 @@ class Game {
     return got;
   }
 
+  // союзник ищется среди всех карт, сыгранных в этот ход (в режиме команд — и у напарника)
   hasAlly(c) {
     const others = this.inPlayAll().filter((o) => o !== c);
     if (others.some((o) => def(o).allAlly)) return true;
@@ -120,7 +172,7 @@ class Game {
     return null;
   }
 
-  enqueueFront(effects, src) { this.queue.unshift(...effects.map((e) => ({ e, src }))); }
+  enqueueFront(effects, src, pid = this.actorId) { this.queue.unshift(...effects.map((e) => ({ e, src, pid }))); }
 
   // Выполняет очередь эффектов; останавливается, если нужен выбор игрока.
   process() {
@@ -128,19 +180,22 @@ class Game {
     while (!this.prompt && !this.over && guard++ < 1000) {
       if (this.queue.length) {
         const it = this.queue.shift();
+        if (!this.pl(it.pid) || !this.pl(it.pid).alive) continue;
+        this.actorId = it.pid;
         this.resolve(it.e, it.src);
         continue;
       }
       const a = this.findAlly();
       if (!a) break;
+      const owner = this.ownerOf(a);
       a.used = a.used || {};
       a.used.ally = true;
-      this.addLog(`Союзная способность: «${def(a).name}»`, 'ally');
-      this.enqueueFront(def(a).ally, a);
+      this.addLog(`Союзная способность: «${def(a).name}»${this.mode === 'teams' && owner ? ` (${owner.name})` : ''}`, 'ally');
+      this.enqueueFront(def(a).ally, a, owner ? owner.id : this.actorId);
     }
   }
 
-  setPrompt(pr, src) { this.prompt = pr; this.promptSrc = src || null; }
+  setPrompt(pr, src) { pr.pid = this.actorId; this.prompt = pr; this.promptSrc = src || null; }
 
   resolve(e, src) {
     const p = this.cur();
@@ -150,10 +205,10 @@ class Game {
     switch (k) {
       case 'trade': this.pool.trade += v; break;
       case 'combat': this.pool.combat += v; break;
-      case 'auth': p.authority += v; this.addLog(`${p.name} восстанавливает ${v} здоровья (${p.authority})`, 'auth'); break;
+      case 'auth': this.changeHp(p, v); this.addLog(`${this.who(p)} восстанавливает ${v} здоровья (${p.authority})`, 'auth'); break;
       case 'draw': { const g = this.draw(p, v); if (g) this.addLog(`${p.name} берёт ${cardsWord(g)}`); break; }
       case 'opDiscard': {
-        const ops = this.opponents();
+        const ops = this.opponents(p);
         if (ops.length === 1) { ops[0].pendingDiscard += v; this.addLog(`${ops[0].name} сбросит карту в начале своего хода`, 'warn'); }
         else if (ops.length > 1) this.setPrompt({ kind: 'opponent', purpose: 'discard', n: v, text: `${srcName}: выберите соперника — он сбросит карту в начале своего хода`, options: ops.map((o) => o.id) }, src);
         break;
@@ -170,7 +225,7 @@ class Game {
       }
       case 'destroyBase': {
         const cards = [];
-        for (const o of this.opponents()) for (const b of o.bases) cards.push({ ...clean(b), zone: 'base', owner: o.id });
+        for (const o of this.opponents(p)) for (const b of o.bases) cards.push({ ...clean(b), zone: 'base', owner: o.id });
         if (cards.length) this.setPrompt({ kind: 'pick', purpose: 'destroyBase', min: 0, max: 1, cards, text: `${srcName}: можете уничтожить любую базу соперника` }, src);
         break;
       }
@@ -234,7 +289,7 @@ class Game {
   refillRow(i) { this.row[i] = this.tradeDeck.pop() || null; this.revealSeq++; }
 
   handlePick(pr, uids) {
-    const p = this.cur();
+    const p = this.pl(pr.pid);
     const src = this.promptSrc;
     switch (pr.purpose) {
       case 'scrapRow':
@@ -259,7 +314,7 @@ class Game {
       }
       case 'destroyBase':
         for (const uid of uids) {
-          for (const o of this.opponents()) {
+          for (const o of this.opponents(p)) {
             const i = o.bases.findIndex((b) => b.uid === uid);
             if (i < 0) continue;
             const b = o.bases.splice(i, 1)[0];
@@ -303,7 +358,7 @@ class Game {
             src.copied = t.copied || t.cid;
             src.used = { primary: true };
             this.addLog(`«Мимикр» копирует «${CARDS[src.copied].name}»`);
-            this.enqueueFront(def(src).primary, src);
+            this.enqueueFront(def(src).primary, src, p.id);
           }
         }
         break;
@@ -313,57 +368,81 @@ class Game {
 
   // ── ходы ──
   startTurn() {
-    const p = this.cur();
+    const act = this.active();
     this.turnNo++;
     this.pool = { trade: 0, combat: 0 };
     this.topNext = 0;
-    this.addLog(`Ход игрока ${p.name}`, 'turn');
-    if (p.pendingDiscard > 0) {
-      const n = Math.min(p.pendingDiscard, p.hand.length);
-      p.pendingDiscard = 0;
-      if (n > 0) this.queue.push({ e: { startDiscard: n }, src: null });
+    this.ready = {};
+    this.undoStack = [];
+    this.addLog(this.mode === 'teams' ? `Ход команды: ${act.map((p) => p.name).join(' и ')}` : `Ход игрока ${act[0].name}`, 'turn');
+    for (const p of act) {
+      if (p.pendingDiscard > 0) {
+        const n = Math.min(p.pendingDiscard, p.hand.length);
+        p.pendingDiscard = 0;
+        if (n > 0) this.queue.push({ e: { startDiscard: n }, src: null, pid: p.id });
+      }
     }
-    for (const b of p.bases) {
-      b.used = {};
-      const prim = def(b).primary;
-      if (isAuto(prim)) { b.used.primary = true; this.queue.push(...prim.map((e) => ({ e, src: b }))); }
+    for (const p of act) {
+      for (const b of p.bases) {
+        b.used = {};
+        const prim = def(b).primary;
+        if (isAuto(prim)) { b.used.primary = true; this.queue.push(...prim.map((e) => ({ e, src: b, pid: p.id }))); }
+      }
     }
+    this.actorId = act[0] ? act[0].id : null;
     this.process();
   }
 
-  nextAlive() {
-    const n = this.players.length;
+  nextTeamIdx() {
+    const n = this.teamOrder.length;
     for (let k = 1; k <= n; k++) {
       const i = (this.turnIdx + k) % n;
-      if (this.players[i].alive) return i;
+      if (this.teamAlive(this.teamOrder[i])) return i;
     }
     return this.turnIdx;
   }
 
-  endTurn() {
-    const p = this.cur();
-    p.discard.push(...p.hand.map(clean), ...p.inPlay.map(clean));
-    p.hand = [];
-    p.inPlay = [];
-    for (const b of p.bases) b.used = {};
-    this.draw(p, 5);
+  // Игрок нажал «Завершить ход». В режиме команд ход переходит, когда готовы оба напарника.
+  endTurn(p) {
+    this.ready[p.id] = true;
+    const act = this.active();
+    if (act.some((x) => !this.ready[x.id])) {
+      this.addLog(`${p.name} готов завершить ход`, 'sys');
+      return;
+    }
+    this.finishTurn();
+  }
+
+  finishTurn() {
+    for (const p of this.active()) {
+      p.discard.push(...p.hand.map(clean), ...p.inPlay.map(clean));
+      p.hand = [];
+      p.inPlay = [];
+      for (const b of p.bases) b.used = {};
+      this.draw(p, 5);
+    }
     this.queue = [];
     this.prompt = null;
     this.promptSrc = null;
-    this.turnIdx = this.nextAlive();
+    this.turnIdx = this.nextTeamIdx();
     this.startTurn();
   }
 
-  eliminate(t, reason) {
-    if (!t.alive) return;
-    t.alive = false;
-    t.place = this.players.filter((p) => p.alive).length + 1;
-    this.addLog(reason || `${t.name} выбывает из игры!`, 'dead');
-    const alive = this.players.filter((p) => p.alive);
-    if (alive.length <= 1) {
+  // Команда (в ffa — игрок) выбывает
+  eliminateTeam(team, reason) {
+    const members = this.teamMembers(team);
+    if (!members.some((m) => m.alive) && members.every((m) => m.place)) return;
+    const aliveTeamsAfter = this.teamOrder.filter((t) => t !== team && this.teamAlive(t)).length;
+    for (const m of members) { m.alive = false; m.place = aliveTeamsAfter + 1; }
+    this.addLog(reason, 'dead');
+    const left = this.teamOrder.filter((t) => this.teamAlive(t));
+    if (left.length <= 1) {
       this.over = true;
-      this.winner = alive[0] ? alive[0].id : null;
-      if (alive[0]) { alive[0].place = 1; this.addLog(`🏆 Победитель — ${alive[0].name}!`, 'win'); }
+      const win = left[0] ? this.players.filter((p) => p.team === left[0]) : [];
+      for (const w of win) w.place = 1;
+      this.winners = win.map((w) => w.id);
+      this.winner = this.winners[0] || null;
+      if (win.length) this.addLog(`🏆 ${win.length > 1 ? 'Победила команда' : 'Победитель —'} ${win.map((w) => w.name).join(' и ')}!`, 'win');
     }
   }
 
@@ -371,25 +450,52 @@ class Game {
   forfeit(pid) {
     const t = this.pl(pid);
     if (!t || !t.alive || this.over) return;
-    const wasTurn = this.cur() === t;
-    this.eliminate(t, `${t.name} покидает игру`);
-    if (!this.over && wasTurn) {
+    const wasActive = this.isActive(pid);
+    const mates = this.players.filter((p) => p.team === t.team && p.alive && p !== t);
+    if (mates.length) {
+      // напарник продолжает играть за команду
+      t.alive = false;
+      t.discard.push(...t.hand.map(clean), ...t.inPlay.map(clean));
+      t.hand = []; t.inPlay = [];
+      this.addLog(`${t.name} покидает игру — ${mates.map((m) => m.name).join(', ')} продолжает за команду`, 'dead');
+      if (this.prompt && this.prompt.pid === pid) { this.prompt = null; this.promptSrc = null; this.queue = this.queue.filter((q) => q.pid !== pid); this.process(); }
+      if (wasActive && this.active().every((x) => this.ready[x.id])) this.finishTurn();
+      return;
+    }
+    this.eliminateTeam(t.team, `${t.name} покидает игру`);
+    if (!this.over && wasActive) {
       t.discard.push(...t.hand.map(clean), ...t.inPlay.map(clean));
       t.hand = []; t.inPlay = [];
       this.queue = []; this.prompt = null; this.promptSrc = null;
-      this.turnIdx = this.nextAlive();
+      this.turnIdx = this.nextTeamIdx();
       this.startTurn();
     }
+  }
+
+  // Тайная правка значений (режим админа)
+  adminSet(pid, v) {
+    const p = this.pl(pid);
+    if (!p) fail('Игрок не найден');
+    const num = (x) => { const n = Math.floor(Number(x)); return Number.isFinite(n) ? Math.max(0, Math.min(9999, n)) : null; };
+    if (v.hp !== undefined && num(v.hp) !== null && p.alive) for (const m of this.teamMembers(p.team)) m.authority = Math.max(1, num(v.hp));
+    if (this.isActive(pid)) {
+      if (v.trade !== undefined && num(v.trade) !== null) this.pool.trade = num(v.trade);
+      if (v.combat !== undefined && num(v.combat) !== null) this.pool.combat = num(v.combat);
+    }
+    this.undoStack = [];
   }
 
   act(pid, a) {
     if (this.over) fail('Игра окончена');
     if (!a || typeof a.type !== 'string') fail('Неизвестное действие');
     if (a.type === 'forfeit') { this.forfeit(pid); return; }
-    const p = this.cur();
-    if (p.id !== pid) fail('Сейчас не ваш ход');
+    if (!this.isActive(pid)) fail('Сейчас не ваш ход');
+    if (this.prompt && this.prompt.pid !== pid) fail('Напарник делает выбор — подождите секунду');
     if (this.prompt && a.type !== 'answer' && a.type !== 'undo') fail('Сначала завершите выбор');
+    const p = this.pl(pid);
+    this.actorId = pid;
     this.lastEvent = null;
+    if (a.type !== 'endTurn') delete this.ready[pid];
     // покупка, атака, утилизация, база, конец хода — дальше отменять розыгрыш нельзя
     if (!['play', 'playAll', 'answer', 'undo'].includes(a.type)) this.undoStack = [];
 
@@ -399,7 +505,7 @@ class Game {
         const uids = p.hand.map((c) => c.uid);
         for (const uid of uids) {
           if (this.prompt || this.over) break;
-          if (p.hand.some((c) => c.uid === uid)) this.play(p, uid);
+          if (p.hand.some((c) => c.uid === uid)) { this.actorId = pid; this.play(p, uid); }
         }
         break;
       }
@@ -410,26 +516,35 @@ class Game {
       case 'attackPlayer': this.attackPlayer(p, a.target, a.amount); break;
       case 'answer': this.answer(p, a); break;
       case 'undo': this.undo(p, a.uid); break;
-      case 'endTurn': this.endTurn(); break;
+      case 'endTurn': this.endTurn(p); break;
+      case 'unready': break;
       default: fail('Неизвестное действие');
     }
   }
 
-  snapshot(uid) {
+  snapshot(uid, pid) {
     return {
-      uid, revealSeq: this.revealSeq, logLen: this.log.length,
+      uid, pid, revealSeq: this.revealSeq, logLen: this.log.length,
       data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext })),
     };
   }
 
-  // Какие сыгранные карты сейчас можно вернуть в руку
-  undoable() { return this.undoStack.filter((s) => s.revealSeq === this.revealSeq).map((s) => s.uid); }
+  // Какие сыгранные карты игрок может сейчас вернуть в руку: после них не открывалось новых карт
+  // и не играл напарник
+  undoable(pid) {
+    const out = [];
+    for (let k = this.undoStack.length - 1; k >= 0; k--) {
+      const s = this.undoStack[k];
+      if (s.pid !== pid || s.revealSeq !== this.revealSeq) break;
+      out.unshift(s.uid);
+    }
+    return out;
+  }
 
   undo(p, uid) {
+    if (!this.undoable(p.id).includes(uid)) fail('Эту карту уже нельзя вернуть');
     const k = this.undoStack.findIndex((s) => s.uid === uid);
-    if (k < 0) fail('Эту карту уже нельзя вернуть');
     const snap = this.undoStack[k];
-    if (snap.revealSeq !== this.revealSeq) fail('Карту нельзя вернуть: после неё открылись новые карты');
     const returned = this.undoStack.slice(k).map((s) => s.uid);
     const names = returned.map((u) => { const c = [...p.inPlay, ...p.bases].find((x) => x.uid === u); return c ? `«${CARDS[c.cid].name}»` : null; }).filter(Boolean);
     Object.assign(this, snap.data);
@@ -442,7 +557,7 @@ class Game {
   play(p, uid) {
     const i = p.hand.findIndex((c) => c.uid === uid);
     if (i < 0) fail('Карты нет в руке');
-    this.undoStack.push(this.snapshot(uid));
+    this.undoStack.push(this.snapshot(uid, p.id));
     const c = p.hand.splice(i, 1)[0];
     const d = def(c);
     c.used = {};
@@ -450,14 +565,14 @@ class Game {
       c.playedTurn = this.turnNo;
       p.bases.push(c);
       this.addLog(`${p.name} строит ${d.outpost ? 'аванпост' : 'базу'} «${d.name}»`, 'play');
-      if (isAuto(d.primary)) { c.used.primary = true; this.enqueueFront(d.primary, c); }
+      if (isAuto(d.primary)) { c.used.primary = true; this.enqueueFront(d.primary, c, p.id); }
     } else {
       p.inPlay.push(c);
       c.used.primary = true;
       this.addLog(`${p.name} играет «${d.name}»`, 'play');
       const hq = p.bases.filter((b) => def(b).fleetHQ).length;
       if (hq) this.pool.combat += hq;
-      this.enqueueFront(d.primary, c);
+      this.enqueueFront(d.primary, c, p.id);
     }
     this.process();
   }
@@ -500,7 +615,7 @@ class Game {
     zone.splice(i, 1);
     if (c.cid === 'explorer') this.explorers++;
     this.addLog(`${p.name} утилизирует «${d.name}»`, 'scrap');
-    this.enqueueFront(d.scrap, c);
+    this.enqueueFront(d.scrap, c, p.id);
     this.process();
   }
 
@@ -512,17 +627,17 @@ class Game {
     b.used = b.used || {};
     if (b.used.primary) fail('Способность уже использована в этот ход');
     b.used.primary = true;
-    this.enqueueFront(d.primary, b);
+    this.enqueueFront(d.primary, b, p.id);
     this.process();
   }
 
   attackBase(p, targetId, uid) {
     const t = this.pl(targetId);
-    if (!t || !t.alive || t === p) fail('Неверная цель');
+    if (!t || !t.alive || t.team === p.team) fail('Неверная цель');
     const b = t.bases.find((c) => c.uid === uid);
     if (!b) fail('Базы нет');
     const d = def(b);
-    if (!d.outpost && t.bases.some((x) => def(x).outpost)) fail('Сначала уничтожьте аванпосты этого игрока');
+    if (!d.outpost && this.teamHasOutpost(t.team)) fail(this.mode === 'teams' ? 'Сначала уничтожьте аванпосты этой команды' : 'Сначала уничтожьте аванпосты этого игрока');
     if (this.pool.combat < d.defense) fail(`Нужно ${d.defense} урона`);
     this.pool.combat -= d.defense;
     t.bases.splice(t.bases.indexOf(b), 1);
@@ -533,16 +648,16 @@ class Game {
 
   attackPlayer(p, targetId, amount) {
     const t = this.pl(targetId);
-    if (!t || !t.alive || t === p) fail('Неверная цель');
-    if (t.bases.some((x) => def(x).outpost)) fail('Сначала уничтожьте аванпосты этого игрока');
+    if (!t || !t.alive || t.team === p.team) fail('Неверная цель');
+    if (this.teamHasOutpost(t.team)) fail(this.mode === 'teams' ? 'Сначала уничтожьте аванпосты этой команды' : 'Сначала уничтожьте аванпосты этого игрока');
     amount = Math.floor(Number(amount));
     if (!(amount >= 1)) fail('Неверный урон');
     if (amount > this.pool.combat) fail('Не хватает урона');
     this.pool.combat -= amount;
-    t.authority -= amount;
-    this.addLog(`${p.name} атакует ${t.name}: −${amount} (осталось ${Math.max(0, t.authority)})`, 'attack');
+    this.changeHp(t, -amount);
+    this.addLog(`${p.name} атакует ${this.mode === 'teams' ? `команду ${this.teamNames(t.team)}` : t.name}: −${amount} (осталось ${Math.max(0, t.authority)})`, 'attack');
     this.lastEvent = { type: 'hit', target: t.id, amount };
-    if (t.authority <= 0) this.eliminate(t, `💥 ${t.name} теряет всё здоровье и выбывает!`);
+    if (t.authority <= 0) this.eliminateTeam(t.team, `💥 ${this.mode === 'teams' ? `Команда ${this.teamNames(t.team)} теряет` : `${t.name} теряет`} всё здоровье и выбывает!`);
   }
 
   answer(p, a) {
@@ -553,7 +668,7 @@ class Game {
       if (!(i >= 0 && i < pr.options.length)) fail('Неверный вариант');
       const src = this.promptSrc;
       this.prompt = null; this.promptSrc = null;
-      this.enqueueFront(pr.options[i], src);
+      this.enqueueFront(pr.options[i], src, pr.pid);
     } else if (pr.kind === 'opponent') {
       if (!pr.options.includes(a.target)) fail('Неверный соперник');
       const t = this.pl(a.target);
@@ -581,35 +696,45 @@ class Game {
       if (c.used) o.used = c.used;
       return o;
     };
-    const cur = this.cur();
+    const me = this.pl(pid);
+    const active = this.active();
     let prompt = null;
     if (this.prompt) {
-      prompt = cur.id === pid ? this.prompt : { waiting: true, text: `${cur.name} делает выбор…` };
+      const owner = this.pl(this.prompt.pid);
+      prompt = this.prompt.pid === pid ? this.prompt : { waiting: true, pid: this.prompt.pid, text: `${owner ? owner.name : 'Игрок'} делает выбор…` };
     }
+    const seesHand = (p) => p.id === pid || (this.mode === 'teams' && me && p.team === me.team);
     return {
+      mode: this.mode,
       players: this.players.map((p) => ({
-        id: p.id, name: p.name, authority: p.authority, alive: p.alive, place: p.place,
+        id: p.id, name: p.name, team: p.team, authority: p.authority, alive: p.alive, place: p.place,
         handCount: p.hand.length, deckCount: p.deck.length,
         discard: p.discard.map(pub), bases: p.bases.map(pub), inPlay: p.inPlay.map(pub),
         pendingDiscard: p.pendingDiscard,
-        hand: p.id === pid ? p.hand.map(pub) : null,
+        hand: seesHand(p) ? p.hand.map(pub) : null,
+        // своя колода — без порядка (отсортирована), чтобы не было спойлера
+        deckList: p.id === pid ? p.deck.map((c) => c.cid).sort() : null,
       })),
       row: this.row.map((c) => (c ? pub(c) : null)),
       tradeDeckCount: this.tradeDeck.length,
+      tradeDeckTotal: tradeDeckSize(this.deckMult),
       explorers: this.explorers,
-      turn: cur.id,
+      active: active.map((p) => p.id),
+      turn: active[0] ? active[0].id : null,
+      ready: Object.keys(this.ready).filter((k) => this.ready[k]),
       turnNo: this.turnNo,
-      undoable: cur.id === pid ? this.undoable() : [],
+      undoable: this.undoable(pid),
       pool: this.pool,
       topNext: this.topNext,
       prompt,
       log: this.log.slice(-120),
       over: this.over,
       winner: this.winner,
+      winners: this.winners,
       settings: this.settings,
       lastEvent: this.lastEvent,
     };
   }
 }
 
-module.exports = { Game, GameError, isAuto };
+module.exports = { Game, GameError, isAuto, deckMult, tradeDeckSize };

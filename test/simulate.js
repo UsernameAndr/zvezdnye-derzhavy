@@ -13,9 +13,10 @@ function totalCards(g) {
 }
 
 function botStep(g) {
-  const p = g.cur();
   const pr = g.prompt;
-  const und = g.undoable();
+  const p = pr ? g.pl(pr.pid) : pick(g.active().filter((x) => !g.ready[x.id] || Math.random() < 0.1));
+  g._bot = p.id;
+  const und = g.undoable(p.id);
   if (und.length && Math.random() < 0.08) return { type: 'undo', uid: pick(und) };
   if (pr) {
     if (pr.kind === 'choose') return { type: 'answer', option: Math.floor(Math.random() * pr.options.length) };
@@ -33,10 +34,15 @@ function botStep(g) {
   if (buyable.length && Math.random() < 0.9) return { type: 'buy', slot: pick(buyable) };
   if (g.pool.trade >= 2 && g.explorers > 0 && Math.random() < 0.5) return { type: 'buy', slot: 'explorer' };
   if (g.pool.combat > 0) {
-    const ops = g.players.filter((o) => o.alive && o !== p);
+    const ops = g.players.filter((o) => o.alive && o.team !== p.team);
     const t = pick(ops);
-    const outposts = t.bases.filter((b) => CARDS[b.cid].outpost);
-    const targets = outposts.length ? outposts : t.bases;
+    const outposts = g.players.filter((o) => o.team === t.team).flatMap((o) => o.bases.filter((b) => CARDS[b.cid].outpost).map((b) => ({ b, o })));
+    if (outposts.length) {
+      const k = outposts.filter((x) => CARDS[x.b.cid].defense <= g.pool.combat);
+      if (k.length) { const x = pick(k); return { type: 'attackBase', target: x.o.id, uid: x.b.uid }; }
+      return { type: 'endTurn' };
+    }
+    const targets = t.bases;
     const killable = targets.filter((b) => CARDS[b.cid].defense <= g.pool.combat);
     if (killable.length && Math.random() < 0.7) return { type: 'attackBase', target: t.id, uid: pick(killable).uid };
     if (!outposts.length) return { type: 'attackPlayer', target: t.id, amount: g.pool.combat };
@@ -44,33 +50,38 @@ function botStep(g) {
   return { type: 'endTurn' };
 }
 
-let games = 0, turnsTotal = 0, errors = 0, illegal = 0;
+let games = 0, turnsTotal = 0, errors = 0, illegal = 0, teamGames = 0;
 const N = Number(process.argv[2] || 500);
 for (let i = 0; i < N; i++) {
-  const n = 2 + (i % 5);
-  const players = Array.from({ length: n }, (_, k) => ({ id: 'p' + k, name: 'Бот' + k }));
-  const g = new Game(players, { authority: [10, 25, 50][i % 3], randomOrder: true });
+  const teams = i % 3 === 0;
+  const n = teams ? 4 : 2 + (i % 5);
+  const players = Array.from({ length: n }, (_, k) => ({ id: 'p' + k, name: 'Бот' + k, team: k % 2 ? 'B' : 'A' }));
+  const g = new Game(players, { authority: [10, 25, 50][i % 3], randomOrder: true, mode: teams ? 'teams' : 'ffa', deckSize: ['auto', '1', '1.5', '2'][i % 4] });
+  if (teams) teamGames++;
   const start = totalCards(g);
   let steps = 0;
   while (!g.over && steps < 20000) {
     const a = botStep(g);
-    try { g.act(g.cur().id, a); }
+    try { g.act(g._bot, a); }
     catch (e) {
-      if (e instanceof GameError) { illegal++; if (illegal < 10) console.log('illegal:', e.message, JSON.stringify(a)); try { g.act(g.cur().id, { type: 'endTurn' }); } catch {} }
+      if (e instanceof GameError) { illegal++; if (illegal < 10) console.log('illegal:', e.message, JSON.stringify(a)); try { g.act(g._bot, { type: 'endTurn' }); } catch {} }
       else { errors++; console.error(e); break; }
     }
     steps++;
     // explorers выдаются из стопки — учитываем их отдельно
-    const explorersOut = 10 - g.explorers;
+    const explorersOut = g.explorersMax - g.explorers;
     const now = totalCards(g);
     if (now > start + explorersOut) { console.error('Карты размножились!', now, start, explorersOut); errors++; break; }
     // проверка случайного форфита
     if (Math.random() < 0.0005 && n > 2) g.forfeit(pick(g.players.filter((p) => p.alive)).id);
+    if (Math.random() < 0.002) g.adminSet(pick(g.players).id, { hp: 1 + Math.floor(Math.random() * 60), trade: Math.floor(Math.random() * 9), combat: Math.floor(Math.random() * 9) });
+    if (teams) { const hp = {}; for (const p of g.players) { if (hp[p.team] === undefined) hp[p.team] = p.authority; else if (hp[p.team] !== p.authority) { console.error('здоровье команды разошлось'); errors++; } } }
     JSON.stringify(g.view(g.players[0].id));
   }
   if (!g.over) { console.error('Партия не завершилась', i); errors++; }
   games++;
   turnsTotal += g.turnNo;
 }
+console.log(`Командных партий: ${teamGames}`);
 console.log(`Партий: ${games}, средняя длина: ${(turnsTotal / games).toFixed(1)} ходов, ошибок: ${errors}, отклонённых ходов: ${illegal}`);
 process.exit(errors ? 1 : 0);
