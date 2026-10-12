@@ -290,3 +290,13 @@ t('админ меняет здоровье, деньги и урон без з�
   assert.equal(g.pool.trade, 7);
   assert.equal(g.log.length, logLen);
 });
+
+t('2×2: вышедший игрок не прикрывает команду своими аванпостами', () => {
+  const g = teams();
+  g.pl('b1').bases.push(c('t_post'));
+  g.forfeit('b1');
+  assert.equal(g.pl('b1').bases.length, 0);
+  g.pool.combat = 5;
+  g.act('a1', { type: 'attackPlayer', target: 'b2', amount: 5 });
+  assert.equal(g.pl('b2').authority, 70);
+});

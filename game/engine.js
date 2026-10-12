@@ -129,7 +129,7 @@ class Game {
   teamNames(team) { return this.teamMembers(team).map((p) => p.name).join(' и '); }
   teamAlive(team) { return this.players.some((p) => p.team === team && p.alive); }
   opponents(p = this.cur()) { return this.players.filter((o) => o.alive && o.team !== p.team); }
-  teamHasOutpost(team) { return this.players.some((o) => o.team === team && o.bases.some((b) => def(b).outpost)); }
+  teamHasOutpost(team) { return this.players.some((o) => o.team === team && o.alive && o.bases.some((b) => def(b).outpost)); }
   inPlayAll() { const r = []; for (const p of this.active()) r.push(...p.inPlay, ...p.bases); return r; }
   ownerOf(card) { return this.active().find((p) => p.inPlay.includes(card) || p.bases.includes(card)); }
   changeHp(p, d) { for (const m of this.teamMembers(p.team)) m.authority += d; }
@@ -455,8 +455,8 @@ class Game {
     if (mates.length) {
       // напарник продолжает играть за команду
       t.alive = false;
-      t.discard.push(...t.hand.map(clean), ...t.inPlay.map(clean));
-      t.hand = []; t.inPlay = [];
+      t.discard.push(...t.hand.map(clean), ...t.inPlay.map(clean), ...t.bases.map(clean));
+      t.hand = []; t.inPlay = []; t.bases = [];
       this.addLog(`${t.name} покидает игру — ${mates.map((m) => m.name).join(', ')} продолжает за команду`, 'dead');
       if (this.prompt && this.prompt.pid === pid) { this.prompt = null; this.promptSrc = null; this.queue = this.queue.filter((q) => q.pid !== pid); this.process(); }
       if (wasActive && this.active().every((x) => this.ready[x.id])) this.finishTurn();
