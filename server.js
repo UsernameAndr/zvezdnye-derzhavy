@@ -32,8 +32,9 @@ const server = http.createServer((req, res) => {
 // Сжатие сообщений: трафик меньше примерно в 7 раз
 const wss = new WebSocketServer({ server, perMessageDeflate: { threshold: 512, zlibDeflateOptions: { level: 6 }, serverNoContextTakeover: false, clientNoContextTakeover: true } });
 
-// Режим админа: пароль задаётся переменной окружения ADMIN_PASSWORD (в коде его нет)
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+// Режим админа. ВРЕМЕННО: пароль по умолчанию прописан в коде — потом убрать и задавать
+// только переменной окружения ADMIN_PASSWORD на Render (она, если задана, важнее).
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '1357';
 function passwordOk(p) {
   if (!ADMIN_PASSWORD) return false;
   const a = crypto.createHash('sha256').update(String(p)).digest();
