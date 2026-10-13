@@ -414,3 +414,8 @@ button.stat:hover { border-color: #4a5870; }
   .team-cols { grid-template-columns: 1fr; }
   .owner-tag { font-size: 8.5px; }
 }
+
+.tag-s.bot { border-color: #4a5870; color: #a9c1e8; }
+.add-bot { cursor: pointer; color: #a9c1e8; font-weight: 600; font-size: 13px; width: 100%; }
+.add-bot:hover { border-color: #5c7aa3; background: #151b28; }
+.team-cols + .add-bot { margin-top: 8px; }

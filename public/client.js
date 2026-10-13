@@ -10,6 +10,7 @@
   };
   const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? b : c; };
   const cardsWord = (n) => `${n} ${plural(n, 'карту', 'карты', 'карт')}`;
+  const initial = (name) => (String(name || '?').replace(/^Бот\s+/, '')[0] || '?').toUpperCase();
 
   let token = store.get('sd_token');
   if (!token) {
@@ -58,6 +59,7 @@
       case 'room': {
         const prevGame = S.room && S.room.game;
         S.room = m.room;
+        if (S.autoBot && S.room.hostId === S.pid && !S.room.game) { S.autoBot = false; if (S.room.members.length === 1) send({ t: 'addBot' }); }
         if (S.room.code && history.replaceState) history.replaceState(null, '', '?room=' + S.room.code);
         if (prevGame && !S.room.game) closeModal();
         render();
@@ -304,6 +306,7 @@
         <div class="panel home-panel">
           <label class="fld">Ваше имя<input id="h-name" maxlength="20" autocomplete="nickname" placeholder="Например, Адмирал" value="${esc(S.name)}"></label>
           <button class="btn primary big" data-act="create">Создать стол</button>
+          <button class="btn" data-act="create-bot">Играть с ботом</button>
           <div class="join-row"><input id="h-code" maxlength="4" placeholder="Код стола" autocapitalize="characters" value="${esc(S.pendingJoin)}"><button class="btn" data-act="join">Войти</button></div>
           <div class="sec-title">Открытые столы</div>
           <div id="h-rooms" class="room-list"></div>
@@ -361,21 +364,23 @@
       const tm = (r.teams || {})[m.id] || 'A';
       const canMove = teamsMode && (m.id === S.pid || host);
       return `<div class="l-player">
-        <span class="avatar" style="--pc:${teamsMode ? TEAMC[tm] : PCOLORS[i % 6]}">${esc((m.name || '?')[0].toUpperCase())}</span>
+        <span class="avatar" style="--pc:${teamsMode ? TEAMC[tm] : PCOLORS[i % 6]}">${esc(initial(m.name))}</span>
         <span class="nm">${esc(m.name)}${m.id === S.pid ? ' <small>(вы)</small>' : ''}</span>
         ${m.id === r.hostId ? '<span class="tag-s">хост</span>' : ''}
+        ${m.bot ? '<span class="tag-s bot">бот</span>' : ''}
         ${!m.connected ? '<span class="tag-s muted">не в сети</span>' : ''}
         ${canMove ? `<button class="lnk" data-act="team" data-pid="${m.id}" data-team="${tm === 'A' ? 'B' : 'A'}">в команду ${tm === 'A' ? 'Б' : 'А'}</button>` : ''}
         ${host && m.id !== S.pid ? `<button class="lnk" data-act="kick" data-pid="${m.id}">убрать</button>` : ''}
       </div>`;
     };
-    const empty = r.members.length < r.settings.maxPlayers ? '<div class="l-player empty-seat">Свободное место</div>' : '';
+    const free = r.members.length < r.settings.maxPlayers;
+    const empty = free ? (host ? '<button class="l-player empty-seat add-bot" data-act="add-bot">+ Добавить бота</button>' : '<div class="l-player empty-seat">Свободное место</div>') : '';
     if (teamsMode) {
       const col = (t) => {
         const ms = r.members.map((m, i) => [m, i]).filter(([m]) => ((r.teams || {})[m.id] || 'A') === t);
         return `<div class="team-col" style="--tc:${TEAMC[t]}"><div class="team-h">Команда ${t === 'A' ? 'А' : 'Б'} <span class="muted">${ms.length}/2</span></div>${ms.map(([m, i]) => row(m, i)).join('') || '<div class="l-player empty-seat">Пусто</div>'}</div>`;
       };
-      $('#l-players').innerHTML = `<div class="team-cols">${col('A')}${col('B')}</div>`;
+      $('#l-players').innerHTML = `<div class="team-cols">${col('A')}${col('B')}</div>` + (host && free ? '<button class="l-player empty-seat add-bot" data-act="add-bot">+ Добавить бота</button>' : '');
     } else {
       $('#l-players').innerHTML = r.members.map(row).join('') + empty;
     }
@@ -521,7 +526,7 @@
       const offline = m && !m.connected;
       if (mobile) {
         return `<button class="opp-chip ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''} ${canAtk || anyBaseTarget ? 'target' : ''}" style="--pc:${colorOf(p.id)}" data-act="opp-sheet" data-pid="${p.id}">
-          <span class="avatar">${esc(p.name[0].toUpperCase())}</span>
+          <span class="avatar">${esc(initial(p.name))}</span>
           <span class="oc-body"><span class="oc-name">${esc(p.name)}${offline ? ' · офлайн' : ''}</span>
           <span class="oc-meta">${p.alive ? `<span class="hp ${p.authority <= 10 ? 'low' : ''}">${I.auth}${Math.max(0, p.authority)}</span><span>баз ${p.bases.length}${C.hasOutpost(p) ? ' 🛡' : ''}</span><span>✋${p.handCount}</span>` : 'выбыл'}</span></span>
           ${canAtk || anyBaseTarget ? '<span class="oc-atk">⚔</span>' : ''}
@@ -532,8 +537,8 @@
         return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}` });
       }).join('');
       return `<div class="opp ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
-        <div class="opp-head"><span class="avatar">${esc(p.name[0].toUpperCase())}</span>
-          <div class="opp-nm"><b>${esc(p.name)}</b>${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
+        <div class="opp-head"><span class="avatar">${esc(initial(p.name))}</span>
+          <div class="opp-nm"><b>${esc(p.name)}</b>${m && m.bot ? ' <span class="tag-s bot">бот</span>' : ''}${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
           <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Здоровье">${Math.max(0, p.authority)}</div></div>
         ${p.alive ? `<div class="opp-meta"><span title="Карт в руке">рука ${p.handCount}</span><span title="Карт в колоде">колода ${p.deckCount}</span>
           <button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>
@@ -553,14 +558,14 @@
       const rdy = (g.ready || []).includes(mate.id);
       if (mobile) {
         mateHTML = `<button class="opp-chip mate ${(g.active || []).includes(mate.id) ? 'turn' : ''} ${mate.alive ? '' : 'dead'}" style="--pc:${colorOf(mate.id)}" data-act="mate-sheet">
-          <span class="avatar">${esc(mate.name[0].toUpperCase())}</span>
+          <span class="avatar">${esc(initial(mate.name))}</span>
           <span class="oc-body"><span class="oc-name">${esc(mate.name)} · напарник</span>
           <span class="oc-meta">${mate.alive ? `<span>✋${mate.handCount}</span><span>баз ${mate.bases.length}</span>${rdy ? '<span class="ok">готов</span>' : ''}${offline ? '<span>офлайн</span>' : ''}` : 'вышел'}</span></span></button>`;
       } else {
         const mhand = (mate.hand || []).map((c) => cardHTML(c, { size: 'mini', attrs: 'data-zone="matehand"' })).join('');
         const mbases = mate.bases.map((b) => cardHTML(b, { size: 'mini', attrs: 'data-zone="matebase"' })).join('');
         mateHTML = `<div class="opp mate ${(g.active || []).includes(mate.id) ? 'turn' : ''} ${mate.alive ? '' : 'dead'}" style="--pc:${colorOf(mate.id)}">
-          <div class="opp-head"><span class="avatar">${esc(mate.name[0].toUpperCase())}</span>
+          <div class="opp-head"><span class="avatar">${esc(initial(mate.name))}</span>
             <div class="opp-nm"><b>${esc(mate.name)}</b> <span class="tag-s">напарник</span>${rdy ? ' <span class="tag-s ok">готов</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div></div>
           ${mate.alive ? `<div class="opp-meta"><span>колода ${mate.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${mate.id}">сброс ${mate.discard.length}</button></div>
           <div class="zl">Рука</div><div class="opp-bases">${mhand || '<span class="none">пусто</span>'}</div>
@@ -920,6 +925,8 @@
     const a = el.dataset.act, d = el.dataset;
     switch (a) {
       case 'create': if (!needName()) send({ t: 'create', name: S.name }); break;
+      case 'create-bot': if (!needName()) { S.autoBot = true; send({ t: 'create', name: S.name }); } break;
+      case 'add-bot': send({ t: 'addBot' }); break;
       case 'join': doJoin($('#h-code').value); break;
       case 'join-code': doJoin(d.code); break;
       case 'leave': closeModal(); send({ t: 'leave' }); break;

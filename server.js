@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { Game, GameError } = require('./game/engine');
+const { decide: botDecide } = require('./game/bot');
 
 const PORT = process.env.PORT || 3000;
 const PUB = path.join(__dirname, 'public');
@@ -66,7 +67,7 @@ function roomView(room, pid) {
     teams: room.teams,
     members: room.members.map((id) => {
       const s = byPid.get(id);
-      return { id, name: s ? s.name : '???', connected: !!(s && s.ws) };
+      return { id, name: s ? s.name : '???', connected: !!(s && (s.ws || s.isBot)), bot: !!(s && s.isBot) };
     }),
     admin: !!(byPid.get(pid) || {}).admin,
     chat: room.chat.slice(-60),
@@ -80,6 +81,58 @@ function broadcastRoom(room) {
   for (const pid of room.members) {
     const s = byPid.get(pid);
     if (s && s.ws) send(s.ws, { t: 'room', room: roomView(room, pid) });
+  }
+  scheduleBots(room);
+}
+
+// ── боты ──
+const BOT_NAMES = ['Вега', 'Орион', 'Сириус', 'Альтаир', 'Лира', 'Денеб', 'Антарес', 'Полярис'];
+const isBotId = (id) => { const s = byPid.get(id); return !!(s && s.isBot); };
+const humans = (room) => room.members.filter((id) => !isBotId(id));
+
+function addBot(room) {
+  const used = new Set(room.members.map((id) => (byPid.get(id) || {}).name));
+  const name = 'Бот ' + (BOT_NAMES.find((n) => !used.has('Бот ' + n)) || (room.members.length + 1));
+  const pid = 'bot-' + rid(4);
+  byPid.set(pid, { pid, name, isBot: true, ws: null, room: room.code });
+  room.members.push(pid);
+  room.teams[pid] = smallerTeam(room);
+  room.chat.push({ sys: true, text: `${name} садится за стол` });
+}
+function removeBot(room, pid) {
+  room.members = room.members.filter((id) => id !== pid);
+  delete room.teams[pid];
+  byPid.delete(pid);
+}
+
+// Боты ходят с паузами, чтобы люди успевали следить за ходом
+function scheduleBots(room) {
+  if (room.botTimer || !room.game || room.game.over) return;
+  if (!room.members.some((id) => { const x = byPid.get(id); return x && x.ws; })) return;
+  const g = room.game;
+  const who = g.prompt ? [g.prompt.pid] : g.active().map((p) => p.id);
+  if (!who.some(isBotId)) return;
+  room.botTimer = setTimeout(() => { room.botTimer = null; botTick(room); }, g.prompt ? 650 : 800);
+}
+function botTick(room) {
+  const g = room.game;
+  if (!g || g.over || !rooms.has(room.code)) return;
+  const who = g.prompt ? [g.prompt.pid] : g.active().map((p) => p.id);
+  for (const pid of who) {
+    if (!isBotId(pid)) continue;
+    const me = g.pl(pid);
+    const mate = g.players.find((x) => x.team === me.team && x.id !== pid && x.alive);
+    // в 2 на 2 с живым напарником бот тратит общие деньги и урон только после того, как напарник нажал «Завершить ход»
+    const holdShared = g.mode === 'teams' && mate && !isBotId(mate.id) && !g.ready[mate.id];
+    const a = botDecide(g, pid, { holdShared });
+    if (!a) continue;
+    try { g.act(pid, a); }
+    catch (e) {
+      if (!(e instanceof GameError)) { console.error(e); }
+      try { g.act(pid, { type: 'endTurn' }); } catch {}
+    }
+    broadcastRoom(room);
+    return;
   }
 }
 
@@ -107,8 +160,8 @@ function leaveRoom(s) {
   if (room.game && !room.game.over) room.game.forfeit(s.pid);
   room.members = room.members.filter((id) => id !== s.pid);
   delete room.teams[s.pid];
-  if (!room.members.length) { rooms.delete(room.code); broadcastList(); return; }
-  if (room.hostId === s.pid) room.hostId = room.members[0];
+  if (!humans(room).length) { for (const id of room.members) byPid.delete(id); clearTimeout(room.botTimer); rooms.delete(room.code); broadcastList(); return; }
+  if (room.hostId === s.pid) room.hostId = humans(room)[0];
   broadcastRoom(room);
   broadcastList();
 }
@@ -221,6 +274,7 @@ const handlers = {
     if (m.pid === s.pid) return;
     const t = byPid.get(m.pid);
     if (!t || !room.members.includes(m.pid)) return;
+    if (t.isBot && !(room.game && !room.game.over)) { removeBot(room, m.pid); broadcastRoom(room); broadcastList(); return; }
     if (room.game && !room.game.over) {
       room.game.forfeit(m.pid);
       room.chat.push({ sys: true, text: `Хост исключил ${t.name} из партии` });
@@ -240,8 +294,18 @@ const handlers = {
     if (room.game && !room.game.over) throw new GameError('Партия ещё идёт');
     room.game = null;
     // отключившиеся игроки освобождают места
-    room.members = room.members.filter((id) => { const x = byPid.get(id); return x && x.ws; });
-    if (!room.members.includes(room.hostId)) room.hostId = room.members[0];
+    room.members = room.members.filter((id) => { const x = byPid.get(id); return x && (x.ws || x.isBot); });
+    if (!room.members.includes(room.hostId)) room.hostId = humans(room)[0];
+    broadcastRoom(room);
+    broadcastList();
+  },
+  addBot(s) {
+    const room = rooms.get(s.room);
+    if (!room) return;
+    if (room.hostId !== s.pid) throw new GameError('Ботов добавляет хост');
+    if (room.game && !room.game.over) throw new GameError('Игра уже идёт');
+    if (room.members.length >= room.settings.maxPlayers) throw new GameError('Нет свободных мест');
+    addBot(room);
     broadcastRoom(room);
     broadcastList();
   },
@@ -347,10 +411,13 @@ setInterval(() => {
   const now = Date.now();
   for (const [code, r] of rooms) {
     const anyone = r.members.some((id) => { const x = byPid.get(id); return x && x.ws; });
-    if (!anyone && now - r.lastActive > 60 * 60_000) {
-      for (const id of r.members) { const x = byPid.get(id); if (x && x.room === code) x.room = null; }
+    // если люди ушли, боты не играют сами с собой бесконечно
+    if (!anyone && r.botTimer) { clearTimeout(r.botTimer); r.botTimer = null; }
+    if (!anyone && now - (r.humanSeen || r.lastActive) > 60 * 60_000) {
+      for (const id of r.members) { const x = byPid.get(id); if (x && x.isBot) byPid.delete(id); else if (x && x.room === code) x.room = null; }
       rooms.delete(code);
     }
+    if (anyone) r.humanSeen = now;
   }
 }, 30_000);
 
