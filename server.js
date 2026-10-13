@@ -73,20 +73,23 @@ function roomView(room, pid) {
     chat: room.chat.slice(-60),
     game: room.game ? room.game.view(pid) : null,
     turnLeft: room.game && !room.game.over && room.deadline ? Math.max(0, room.deadline - Date.now()) : null,
-    turnLimit: TURN_MS,
+    turnLimit: turnMs(room.game),
     you: pid,
   };
 }
 
 // ── таймер хода: 60 секунд ──
 const TURN_MS = (Number(process.env.TURN_SECONDS) || 60) * 1000;
+// в режиме 2 на 2 ход общий на двоих — времени вдвое больше
+const turnMs = (g) => (g && g.mode === 'teams' ? TURN_MS * 2 : TURN_MS);
 function ensureTurnTimer(room) {
   const g = room.game;
   if (!g || g.over) { clearTimeout(room.turnTimer); room.turnTimer = null; room.deadline = null; room.timerTurn = null; return; }
   if (room.timerTurn === g.turnNo) return;
   clearTimeout(room.turnTimer);
   room.timerTurn = g.turnNo;
-  room.deadline = Date.now() + TURN_MS;
+  const limit = turnMs(g);
+  room.deadline = Date.now() + limit;
   const turn = g.turnNo;
   room.turnTimer = setTimeout(() => {
     room.turnTimer = null;
@@ -97,7 +100,7 @@ function ensureTurnTimer(room) {
     if (!anyoneOnline || !humansActive) { room.timerTurn = null; return; }
     g.timeout();
     broadcastRoom(room);
-  }, TURN_MS + 300);
+  }, limit + 300);
 }
 
 function broadcastRoom(room) {
