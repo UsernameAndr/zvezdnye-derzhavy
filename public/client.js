@@ -23,7 +23,7 @@
     name: store.get('sd_name') || '',
     room: null, rooms: [], screen: null,
     sel: [], selKey: null,
-    side: 'log', sideOpen: false, unread: 0, chatSeenUser: undefined,
+    side: 'log', sideOpen: false, sideHidden: store.get('sd_side_hidden') === '1', unread: 0, chatSeenUser: undefined,
     pendingJoin: (new URLSearchParams(location.search).get('room') || '').toUpperCase(),
     prevAuth: {}, wasMyTurn: false, modal: null, sound: store.get('sd_sound') !== '0',
     goShown: false, tutorialShown: false,
@@ -496,7 +496,6 @@
       app.innerHTML = `<div class="game">
         <div id="board" class="board"></div>
         <aside id="side" class="side">
-          <div id="side-opps" class="side-opps"></div>
           <div class="tabs"><button data-act="tab" data-tab="log" class="on">Журнал</button><button data-act="tab" data-tab="chat">Чат <span id="unread" class="unread hidden"></span></button><button class="side-close" data-act="toggle-side" aria-label="Закрыть">×</button></div>
           <div id="side-log" class="log"></div>
           <div id="side-chat" class="side-chat hidden"><div id="chatlog" class="chatlog"></div><form id="chatform" class="chatform"><input maxlength="200" placeholder="Сообщение…"><button class="btn">→</button></form></div>
@@ -508,7 +507,7 @@
 
     const userMsgs = r.chat.filter((c) => !c.sys).length;
     if (S.chatSeenUser === undefined) S.chatSeenUser = userMsgs;
-    if (S.side === 'chat' && (S.sideOpen || matchMedia('(min-width: 1100px)').matches)) S.chatSeenUser = userMsgs;
+    if (S.side === 'chat' && (S.sideOpen || (mqWide.matches && !S.sideHidden))) S.chatSeenUser = userMsgs;
     S.unread = Math.max(0, userMsgs - S.chatSeenUser);
 
     if (myTurn && !S.wasMyTurn) { beep(); flashTurn(); }
@@ -546,17 +545,17 @@
         const can = canAttackBase(C, p, b);
         return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}` });
       }).join('');
+      const atk = canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${p.id}">Атаковать</button>` : '';
       return `<div class="opp ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
-        <div class="opp-head"><span class="avatar">${esc(initial(p.name))}</span>
-          <div class="opp-nm"><b>${esc(p.name)}</b>${m && m.bot ? ' <span class="tag-s bot">бот</span>' : ''}${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
-          <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Здоровье">${Math.max(0, p.authority)}</div></div>
-        ${p.alive ? `<div class="opp-meta"><span title="Карт в руке">рука ${p.handCount}</span><span title="Карт в колоде">колода ${p.deckCount}</span>
-          <button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>
-          ${p.pendingDiscard ? `<span class="tag-s warn">сбросит ${p.pendingDiscard}</span>` : ''}</div>
-          <div class="opp-bases">${bases || '<span class="none">нет баз</span>'}</div>
-          ${canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${p.id}">Атаковать</button>` : C.hasOutpost(p) && myTurn && combat > 0 ? '<div class="muted small">Защищён аванпостом</div>' : ''}
-          ${host && offline && !g.over ? `<button class="lnk danger" data-act="kick" data-pid="${p.id}">исключить</button>` : ''}`
-        : `<div class="muted">выбыл${p.place ? ` · ${p.place} место` : ''}</div>`}
+        <div class="opp-head g2"><span class="avatar">${esc(initial(p.name))}</span>
+          <div class="nm-line"><b>${esc(p.name)}</b>${m && m.bot ? ' <span class="tag-s bot">бот</span>' : ''}${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
+          <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Здоровье">${Math.max(0, p.authority)}</div>
+          ${p.alive ? `<div class="opp-meta"><span title="Карт в руке">рука ${p.handCount}</span><span title="Карт в колоде">колода ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>${p.pendingDiscard ? `<span class="tag-s warn">сбросит ${p.pendingDiscard}</span>` : ''}</div>`
+            : `<div class="opp-meta">выбыл${p.place ? ` · ${p.place} место` : ''}</div>`}
+          ${atk ? `<div class="atk">${atk}</div>` : ''}</div>
+        ${p.alive ? `${bases ? `<div class="opp-bases">${bases}</div>` : ''}
+          ${!canAtk && C.hasOutpost(p) && myTurn && combat > 0 ? '<div class="muted small">🛡 Защищён аванпостом — сначала уничтожьте его</div>' : ''}
+          ${host && offline && !g.over ? `<button class="lnk danger" data-act="kick" data-pid="${p.id}">исключить</button>` : ''}` : ''}
       </div>`;
     }).join('');
 
@@ -651,13 +650,17 @@
           <button class="btn sm ghost" data-act="rules">Правила</button>
           <button class="btn sm ghost" data-act="menu">Меню</button>
           <button class="btn sm ghost side-toggle" data-act="toggle-side">Журнал${S.unread ? ` <span class="unread">${S.unread}</span>` : ''}</button>
+          <button class="btn sm ghost side-hide" data-act="hide-side" title="${S.sideHidden ? 'Показать журнал и чат' : 'Скрыть журнал и чат, чтобы освободить место на столе'}">${S.sideHidden ? `Журнал и чат${S.unread ? ` <span class="unread">${S.unread}</span>` : ''}` : 'Скрыть панель'}</button>
         </div>
       </header>
       ${mqWide.matches ? '' : `<section class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${mateHTML}${oppHTML}</section>`}
+      <div class="top-row">
       <section class="zone market ${tip.cue === 'market' ? 'cue' : ''}">
         <div class="zl">Торговый ряд <span class="muted">· в колоде ${g.tradeDeckCount}</span></div>
         <div class="strip">${rowHTML}${expHTML}</div>
       </section>
+      ${mqWide.matches ? `<section class="opps-area"><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}${mateHTML}</div></section>` : ''}
+      </div>
       <div class="table-row"><section class="zone play-zone" style="--pc:${colorOf(cur.id)}">
         <div class="zl">${isMe ? (teams ? 'Сыграно вашей командой' : 'Вы сыграли') : `Сыграно: ${C.curName}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
         <div class="strip">${playHTML || '<span class="none">Пока ничего</span>'}</div>
@@ -666,7 +669,7 @@
 
     S.prevAuth = Object.fromEntries(g.players.map((p) => [p.id, p.authority]));
     tickTimer();
-    $('#side-opps').innerHTML = mqWide.matches ? `${mateHTML ? `<div class="zl">Напарник</div><div class="opps">${mateHTML}</div>` : ''}<div class="zl">Соперники</div><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}</div>` : '';
+    $('.game').classList.toggle('side-hidden', !!S.sideHidden);
 
     const logEl = $('#side-log');
     logEl.innerHTML = g.log.map((l) => `<div class="le ${l.kind || ''}">${esc(l.text)}</div>`).join('');
@@ -720,12 +723,14 @@
       return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${m.id}" ${can ? `data-act="atkbase" data-target="${m.id}"` : ''}`, badge: `<span class="owner-tag">${esc(m.name)}</span>` });
     }).join('');
     return `<div class="opp team-card ${isTurn ? 'turn' : ''} ${alive.length ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
-      <div class="opp-head"><div class="opp-nm"><b>Команда соперников</b></div>
-        <div class="hp-badge ${hp <= 10 ? 'low' : ''}" title="Здоровье команды">${hp}</div></div>
+      <div class="opp-head g2 noav"><div class="nm-line"><b>Команда соперников</b></div>
+        <div class="hp-badge ${hp <= 10 ? 'low' : ''}" title="Здоровье команды">${hp}</div>
+        <div class="opp-meta">${alive.length ? `баз ${bases.length}${C.hasOutpost(p) ? ' · 🛡' : ''}` : 'выбыла'}</div>
+        ${alive.length && canAtk ? `<div class="atk"><button class="btn danger sm" data-act="atkplayer" data-target="${target.id}">Атаковать</button></div>` : ''}</div>
       <div class="tm-list">${members.map(memberLine).join('')}</div>
       ${alive.length ? `<div class="zl">Базы команды${C.hasOutpost(p) ? ' · <span class="tag-s">🛡 аванпост защищает команду</span>' : ''}</div>
         <div class="opp-bases">${bHTML || '<span class="none">нет баз</span>'}</div>
-        ${canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${target.id}">Атаковать команду</button>` : C.hasOutpost(p) && myTurn && combat > 0 ? '<div class="muted small">Сначала уничтожьте аванпост</div>' : ''}`
+        ${!canAtk && C.hasOutpost(p) && myTurn && combat > 0 ? '<div class="muted small">Сначала уничтожьте аванпост</div>' : ''}`
       : `<div class="muted">команда выбыла${p.place ? ` · ${p.place} место` : ''}</div>`}
     </div>`;
   }
@@ -860,7 +865,7 @@
   }
 
   function adminLogin() {
-    openModal(`<h3>Режим админа</h3><p class="muted">Для проверок: меняет ваши здоровье, деньги и урон.</p>
+    openModal(`<h3>Режим админа</h3><p class="muted">Для проверок: меняет здоровье, деньги и урон — свои и других игроков.</p>
       <form id="adm-form" class="adm-form"><input id="adm-pass" type="password" autocomplete="current-password" placeholder="Пароль"><button class="btn primary">Войти</button></form>`, { kind: 'admin-login' });
     const f = $('#adm-form');
     f.addEventListener('submit', (e) => { e.preventDefault(); send({ t: 'adminLogin', password: $('#adm-pass').value }); });
@@ -871,27 +876,39 @@
     const g = S.room && S.room.game;
     if (!g) { closeModal(); toast('Режим админа включён — значения можно менять во время партии'); return; }
     const C = ctx();
-    if (!C.me) return;
-    if (refresh) { const el = $('#adm-turn'); if (el) el.textContent = C.myTurn ? '' : 'Деньги и урон можно менять только в свой ход.'; return; }
+    if (!S.admTarget || !g.players.some((p) => p.id === S.admTarget)) S.admTarget = C.me ? C.me.id : g.players[0].id;
+    const t = g.players.find((p) => p.id === S.admTarget);
+    const active = (g.active || []).includes(t.id) && !g.over;
+    // при обновлении стола окно не перерисовываем, чтобы не сбить ввод — только если сменилось, чей ход
+    if (refresh) { if (S.admActive !== active) adminPanel(); return; }
+    S.admActive = active;
+    const teams = g.mode === 'teams';
+    const who = (p) => (p.id === S.pid ? 'Вы' : p.name);
     const num = (id, label, val, dis) => `<label class="adm-row"><span>${label}</span><span class="stepper sm"><button type="button" class="btn" data-adm="${id}" data-d="-1" ${dis ? 'disabled' : ''}>−</button><input id="${id}" type="number" min="0" max="9999" value="${val}" ${dis ? 'disabled' : ''}><button type="button" class="btn" data-adm="${id}" data-d="1" ${dis ? 'disabled' : ''}>+</button></span></label>`;
+    const tabs = [...g.players].sort((a, b) => (b.id === S.pid) - (a.id === S.pid)).map((p) => `<button type="button" class="seg ${p.id === t.id ? 'on' : ''}" data-adm-target="${p.id}" ${p.alive ? '' : 'disabled'}>${esc(who(p))}</button>`).join('');
     openModal(`<h3>Режим админа</h3>
       <form id="adm-set" class="adm-set">
-        ${num('adm-hp', C.teams ? 'Здоровье команды' : 'Здоровье', C.me.authority, false)}
-        ${num('adm-trade', 'Деньги', C.myTurn ? C.g.pool.trade : 0, !C.myTurn)}
-        ${num('adm-combat', 'Урон', C.myTurn ? C.g.pool.combat : 0, !C.myTurn)}
-        <p class="muted small" id="adm-turn">${C.myTurn ? '' : 'Деньги и урон можно менять только в свой ход.'}</p>
+        <div class="adm-row adm-who"><span>Игрок</span></div>
+        <div class="segs adm-targets">${tabs}</div>
+        ${num('adm-hp', teams ? `Здоровье команды (${esc(g.players.filter((p) => p.team === t.team).map(who).join(' и '))})` : 'Здоровье', Math.max(0, t.authority), !t.alive)}
+        ${num('adm-trade', 'Деньги', active ? (g.purse || {})[t.id] || 0 : 0, !active)}
+        ${num('adm-combat', teams ? 'Урон команды' : 'Урон', active ? g.pool.combat : 0, !active)}
+        <p class="muted small" id="adm-turn">${active ? '' : `Деньги и урон можно менять, только когда ${t.id === S.pid ? 'ваш ход' : `ходит ${esc(t.name)}`}.`}</p>
         <div class="m-actions"><button type="button" class="btn" data-act="close-modal">Закрыть</button><button class="btn primary">Применить</button></div>
       </form>`, { kind: 'admin' });
     $('#adm-set').addEventListener('click', (e) => {
+      const tg = e.target.closest('[data-adm-target]');
+      if (tg) { S.admTarget = tg.dataset.admTarget; adminPanel(); return; }
       const b = e.target.closest('[data-adm]'); if (!b) return;
       const inp = $('#' + b.dataset.adm); inp.value = Math.max(0, (+inp.value || 0) + (+b.dataset.d));
     });
     $('#adm-set').addEventListener('submit', (e) => {
       e.preventDefault();
-      const v = { hp: +$('#adm-hp').value };
+      const v = {};
+      if (!$('#adm-hp').disabled) v.hp = +$('#adm-hp').value;
       if (!$('#adm-trade').disabled) { v.trade = +$('#adm-trade').value; v.combat = +$('#adm-combat').value; }
-      send({ t: 'adminSet', values: v });
-      toast('Значения изменены');
+      send({ t: 'adminSet', target: t.id, values: v });
+      toast(t.id === S.pid ? 'Значения изменены' : `Значения изменены: ${t.name}`);
     });
   }
 
@@ -1029,6 +1046,7 @@
       }
       case 'pick-ok': { const uids = S.sel.slice(); answered(); act({ type: 'answer', uids }); break; }
       case 'pick-skip': answered(); act({ type: 'answer', uids: [] }); break;
+      case 'hide-side': S.sideHidden = !S.sideHidden; store.set('sd_side_hidden', S.sideHidden ? '1' : ''); if (!S.sideHidden) markChatSeen(); render(); break;
       case 'toggle-side': S.sideOpen = !S.sideOpen; $('#side') && $('#side').classList.toggle('open', S.sideOpen); markChatSeen(); break;
       case 'tab':
         S.side = d.tab;

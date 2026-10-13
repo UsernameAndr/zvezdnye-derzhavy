@@ -363,7 +363,9 @@ const handlers = {
     if (!s.admin) throw new GameError('Нет доступа');
     const room = rooms.get(s.room);
     if (!room || !room.game || room.game.over) throw new GameError('Игра не идёт');
-    room.game.adminSet(s.pid, m.values || {});
+    // можно менять и себя, и любого другого игрока за столом
+    const target = m.target && room.game.pl(String(m.target)) ? String(m.target) : s.pid;
+    room.game.adminSet(target, m.values || {});
     broadcastRoom(room);
   },
   chat(s, m) {
