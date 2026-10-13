@@ -260,7 +260,7 @@
       <li><b>Сыграйте карты из руки.</b> Они дают ${I.trade} деньги, ${I.combat} урон и ${I.auth} здоровье.</li>
       <li><b>Купите карты</b> из торгового ряда за деньги. Покупки уходят в ваш сброс и попадут в руку позже.</li>
       <li><b>Атакуйте</b> уроном соперника или его базы. Пока у соперника есть <b>аванпост</b>, сначала бейте его.</li>
-      <li><b>Завершите ход</b> — вы возьмёте 5 новых карт. Непотраченные деньги и урон сгорают. На ход даётся <b>1 минута</b> (в режиме 2 на 2 — <b>2 минуты</b>), потом он завершится сам.</li>
+      <li><b>Завершите ход</b> — вы возьмёте 5 новых карт. Непотраченные деньги и урон сгорают. Если хост ограничил время хода, ход завершится сам, когда время выйдет.</li>
       <li><b>Союз</b> — бонус, если в ход сыграно 2+ карты одной фракции. <b>Утиль</b> — убрать карту из игры ради эффекта.</li>
     </ol>`;
   }
@@ -404,6 +404,8 @@
         ${teamsMode ? '' : `<div class="set"><div class="set-l">Мест за столом</div><div class="segs">${chips('maxPlayers', [2, 3, 4, 5, 6], st.maxPlayers)}</div></div>`}
         <div class="set"><div class="set-l">Торговая колода</div><div class="segs">${chips('deckSize', ['auto', '1', '1.5', '2'], String(st.deckSize || 'auto'), (v) => deckLbl[v])}</div>
           <p class="muted small set-note">${String(st.deckSize || 'auto') === 'auto' ? 'Авто: 80 карт на 2–3 игроков, 120 на 4, 160 на 5–6.' : 'Карт в торговой колоде на всю партию.'}</p></div>
+        <div class="set"><div class="set-l">Время на ход</div><div class="segs">${chips('turnTime', ['off', '60', '120'], String(st.turnTime || 'off'), (v) => ({ off: 'Без ограничения', 60: '1 минута', 120: '2 минуты' })[v])}</div>
+          ${String(st.turnTime || 'off') !== 'off' ? '<p class="muted small set-note">Когда время выйдет, ход завершится сам.</p>' : ''}</div>
         <div class="set"><div class="set-l">Первый ход</div><div class="segs">${chips('randomOrder', [true, false], st.randomOrder, (v) => (v ? 'Случайно' : 'По порядку входа'))}</div></div>
         ${host ? '' : '<p class="muted">Настройки выбирает хост.</p>'}`;
       const ai = $('#l-auth');
@@ -437,7 +439,8 @@
     const actives = g.players.filter((p) => active.includes(p.id));
     const cur = actives[0] || g.players[0];
     const myTurn = !!me && me.alive && active.includes(S.pid) && !g.over;
-    const blocked = !!g.prompt;
+    // блокирует только своё окно выбора; пока выбирает напарник, можно ходить дальше
+    const blocked = !!(g.prompt && !g.prompt.waiting);
     const ready = (g.ready || []).includes(S.pid);
     const mate = teams && me ? g.players.find((p) => p.team === me.team && p.id !== me.id) : null;
     const colorOf = (pid) => { const p = g.players.find((x) => x.id === pid); return teams && p ? TEAMC[p.team] : PCOLORS[g.players.findIndex((x) => x.id === pid) % 6]; };
@@ -463,8 +466,7 @@
     if (g.over) return { text: 'Партия окончена.', cue: '' };
     if (!me || !me.alive) return { text: 'Вы наблюдаете за партией.', cue: '' };
     if (!myTurn) return { text: `Сейчас ${C.teams ? 'ходит команда' : 'ходит'} ${C.curName}. ${isTouch ? 'Нажмите на карту, чтобы прочитать её описание.' : 'Наведите курсор на карту, чтобы прочитать описание.'}`, cue: '' };
-    if (g.prompt && g.prompt.waiting) return { text: 'Напарник делает выбор — секунду.', cue: '' };
-    if (g.prompt) return { text: 'Сделайте выбор в открытом окне.', cue: '' };
+    if (C.blocked) return { text: 'Сделайте выбор в открытом окне.', cue: '' };
     if (C.ready) return { text: `Вы готовы завершить ход. Ждём, когда ${esc(C.mate ? C.mate.name : 'напарник')} тоже нажмёт «Завершить ход».`, cue: '' };
     if (me.hand.length) return { text: `<b>Шаг 1.</b> Сыграйте карты из руки — ${isTouch ? 'нажмите на карту' : 'щёлкните по карте'} или «Сыграть все».`, cue: 'hand' };
     const manual = me.bases.filter((b) => CARDS[b.cid].primary.length && !(b.used && b.used.primary));
@@ -519,6 +521,7 @@
     const tip = coach(C);
     if (myTurn && !blocked && (g.undoable || []).length && !me.hand.length) tip.text += ' <span class="muted">Ошиблись с картой? Крестик на ней вернёт её в руку.</span>';
     if (teams && myTurn && !blocked && !C.ready && tip.cue) tip.text += ' <span class="muted">Урон общий с напарником, деньги у каждого свои.</span>';
+    if (myTurn && g.prompt && g.prompt.waiting) tip.text += ` <span class="muted">${esc(g.prompt.text)} Вы можете ходить дальше.</span>`;
     const combat = g.pool.combat, trade = g.pool.trade;
 
     // соперники
@@ -659,8 +662,7 @@
         <div class="zl">${isMe ? (teams ? 'Сыграно вашей командой' : 'Вы сыграли') : `Сыграно: ${C.curName}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
         <div class="strip">${playHTML || '<span class="none">Пока ничего</span>'}</div>
       </section>${basesZone}</div>
-      ${mineHTML}
-      ${g.prompt && g.prompt.waiting ? `<div class="waiting-banner">${esc(g.prompt.text)}</div>` : ''}`;
+      ${mineHTML}`;
 
     S.prevAuth = Object.fromEntries(g.players.map((p) => [p.id, p.authority]));
     tickTimer();
@@ -982,7 +984,7 @@
       case 'join-code': doJoin(d.code); break;
       case 'leave': closeModal(); send({ t: 'leave' }); break;
       case 'set': {
-        let v = d.v; if (v === 'true') v = true; else if (v === 'false') v = false; else if (/^\d+$/.test(v) && d.k !== 'deckSize') v = +v;
+        let v = d.v; if (v === 'true') v = true; else if (v === 'false') v = false; else if (/^\d+$/.test(v) && d.k !== 'deckSize' && d.k !== 'turnTime') v = +v;
         send({ t: 'settings', settings: { ...S.room.settings, [d.k]: v } });
         break;
       }

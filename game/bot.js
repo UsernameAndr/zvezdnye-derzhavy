@@ -89,8 +89,7 @@ function bestPurchase(g, p, money) {
 
 function deckSize(p) { return p.deck.length + p.hand.length + p.discard.length + p.inPlay.length; }
 
-function answerPrompt(g, p) {
-  const pr = g.prompt;
+function answerPrompt(g, p, pr) {
   const enemies = g.opponents(p);
   if (pr.kind === 'choose') {
     // оцениваем варианты по ситуации
@@ -166,7 +165,9 @@ function decide(g, botId, opts = {}) {
   if (g.over) return null;
   const p = g.pl(botId);
   if (!p || !p.alive) return null;
-  if (g.prompt) return g.prompt.pid === botId ? answerPrompt(g, p) : null;
+  // своё окно выбора — ответить; чужие окна (напарника) бота не блокируют
+  const own = g.promptOf(botId);
+  if (own) return answerPrompt(g, p, own);
   if (!g.isActive(botId)) return null;
   if (g.ready[botId]) return null;
 

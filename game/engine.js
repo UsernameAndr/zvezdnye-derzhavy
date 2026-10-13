@@ -92,9 +92,8 @@ class Game {
     this.topNext = 0;
     this.purse = {};     // деньги каждого игрока в этот ход
     this.topNextBy = {}; // «следующий корабль — на верх колоды» у каждого игрока
-    this.queue = [];
-    this.prompt = null;
-    this.promptSrc = null;
+    this.queues = {};   // очередь эффектов у каждого игрока
+    this.prompts = {};  // открытое окно выбора у каждого игрока: pid → { pr, src }
     this.over = false;
     this.winner = null;
     this.winners = [];
@@ -120,6 +119,17 @@ class Game {
     this.addLog(`Партия началась! ${this.mode === 'teams' ? 'Режим 2 на 2, здоровье команды' : 'Стартовое здоровье'}: ${this.settings.authority}. Первым ходит ${first}.`, 'sys');
     this.startTurn();
   }
+
+  // ── окна выбора: у каждого игрока свои, напарник не ждёт ──
+  get prompt() {
+    for (const p of this.active()) if (this.prompts[p.id]) return this.prompts[p.id].pr;
+    const k = Object.keys(this.prompts)[0];
+    return k ? this.prompts[k].pr : null;
+  }
+  promptOf(pid) { return this.prompts[pid] ? this.prompts[pid].pr : null; }
+  qOf(pid) { return this.queues[pid] || (this.queues[pid] = []); }
+  clearChoices(pid) { delete this.prompts[pid]; delete this.queues[pid]; }
+  findCard(uid) { for (const p of this.players) for (const c of [...p.inPlay, ...p.bases]) if (c.uid === uid) return c; return null; }
 
   // ── утилиты ──
   addLog(text, kind = '') { this.log.push({ text, kind, t: Date.now() }); if (this.log.length > 300) this.log.shift(); }
@@ -178,30 +188,39 @@ class Game {
     return null;
   }
 
-  enqueueFront(effects, src, pid = this.actorId) { this.queue.unshift(...effects.map((e) => ({ e, src, pid }))); }
+  enqueueFront(effects, src, pid = this.actorId) { this.qOf(pid).unshift(...effects.map((e) => ({ e, src, pid }))); }
 
   // Выполняет очередь эффектов; останавливается, если нужен выбор игрока.
   process() {
     let guard = 0;
-    while (!this.prompt && !this.over && guard++ < 1000) {
-      if (this.queue.length) {
-        const it = this.queue.shift();
-        if (!this.pl(it.pid) || !this.pl(it.pid).alive) continue;
+    const back = this.actorId;
+    while (!this.over && guard++ < 2000) {
+      // по очереди выполняем эффекты тех, у кого нет открытого окна выбора
+      let progressed = false;
+      for (const p of this.players) {
+        const q = this.queues[p.id];
+        if (!q || !q.length || this.prompts[p.id]) continue;
+        const it = q.shift();
+        if (!p.alive) continue;
         this.actorId = it.pid;
         this.resolve(it.e, it.src);
-        continue;
+        progressed = true;
+        break;
       }
+      if (progressed) continue;
       const a = this.findAlly();
       if (!a) break;
       const owner = this.ownerOf(a);
       a.used = a.used || {};
       a.used.ally = true;
       this.addLog(`Союзная способность: «${def(a).name}»${this.mode === 'teams' && owner ? ` (${owner.name})` : ''}`, 'ally');
-      this.enqueueFront(def(a).ally, a, owner ? owner.id : this.actorId);
+      const pid = owner ? owner.id : back;
+      this.qOf(pid).push(...def(a).ally.map((e) => ({ e, src: a, pid })));
     }
+    this.actorId = back;
   }
 
-  setPrompt(pr, src) { pr.pid = this.actorId; this.prompt = pr; this.promptSrc = src || null; }
+  setPrompt(pr, src) { pr.pid = this.actorId; this.prompts[this.actorId] = { pr, src: src || null }; delete this.ready[this.actorId]; }
 
   resolve(e, src) {
     const p = this.cur();
@@ -295,9 +314,9 @@ class Game {
 
   refillRow(i) { this.row[i] = this.tradeDeck.pop() || null; this.revealSeq++; }
 
-  handlePick(pr, uids) {
+  handlePick(pr, uids, srcRef) {
     const p = this.pl(pr.pid);
-    const src = this.promptSrc;
+    const src = srcRef ? (this.findCard(srcRef.uid) || srcRef) : null;
     switch (pr.purpose) {
       case 'scrapRow':
         for (const uid of uids) {
@@ -383,19 +402,21 @@ class Game {
     this.topNextBy = {};
     this.ready = {};
     this.undoStack = [];
+    this.queues = {};
+    this.prompts = {};
     this.addLog(this.mode === 'teams' ? `Ход команды: ${act.map((p) => p.name).join(' и ')}` : `Ход игрока ${act[0].name}`, 'turn');
     for (const p of act) {
       if (p.pendingDiscard > 0) {
         const n = Math.min(p.pendingDiscard, p.hand.length);
         p.pendingDiscard = 0;
-        if (n > 0) this.queue.push({ e: { startDiscard: n }, src: null, pid: p.id });
+        if (n > 0) this.qOf(p.id).push({ e: { startDiscard: n }, src: null, pid: p.id });
       }
     }
     for (const p of act) {
       for (const b of p.bases) {
         b.used = {};
         const prim = def(b).primary;
-        if (isAuto(prim)) { b.used.primary = true; this.queue.push(...prim.map((e) => ({ e, src: b, pid: p.id }))); }
+        if (isAuto(prim)) { b.used.primary = true; this.qOf(p.id).push(...prim.map((e) => ({ e, src: b, pid: p.id }))); }
       }
     }
     this.actorId = act[0] ? act[0].id : null;
@@ -419,6 +440,7 @@ class Game {
       this.addLog(`${p.name} готов завершить ход`, 'sys');
       return;
     }
+    if (act.some((x) => this.prompts[x.id])) return;
     this.finishTurn();
   }
 
@@ -430,9 +452,8 @@ class Game {
       for (const b of p.bases) b.used = {};
       this.draw(p, 5);
     }
-    this.queue = [];
-    this.prompt = null;
-    this.promptSrc = null;
+    this.queues = {};
+    this.prompts = {};
     this.turnIdx = this.nextTeamIdx();
     this.startTurn();
   }
@@ -467,15 +488,16 @@ class Game {
       t.discard.push(...t.hand.map(clean), ...t.inPlay.map(clean), ...t.bases.map(clean));
       t.hand = []; t.inPlay = []; t.bases = [];
       this.addLog(`${t.name} покидает игру — ${mates.map((m) => m.name).join(', ')} продолжает за команду`, 'dead');
-      if (this.prompt && this.prompt.pid === pid) { this.prompt = null; this.promptSrc = null; this.queue = this.queue.filter((q) => q.pid !== pid); this.process(); }
-      if (wasActive && this.active().every((x) => this.ready[x.id])) this.finishTurn();
+      this.clearChoices(pid);
+      this.process();
+      if (wasActive && this.active().every((x) => this.ready[x.id] && !this.prompts[x.id])) this.finishTurn();
       return;
     }
     this.eliminateTeam(t.team, `${t.name} покидает игру`);
     if (!this.over && wasActive) {
       t.discard.push(...t.hand.map(clean), ...t.inPlay.map(clean));
       t.hand = []; t.inPlay = [];
-      this.queue = []; this.prompt = null; this.promptSrc = null;
+      this.queues = {}; this.prompts = {};
       this.turnIdx = this.nextTeamIdx();
       this.startTurn();
     }
@@ -487,13 +509,13 @@ class Game {
     const turn = this.turnNo;
     this.addLog('⏱ Время хода вышло — ход завершён', 'warn');
     for (let i = 0; i < 50 && !this.over && this.turnNo === turn; i++) {
-      const pr = this.prompt;
-      if (pr) {
-        const pid = pr.pid;
+      const pid = Object.keys(this.prompts).find((id) => this.isActive(id));
+      if (pid) {
+        const pr = this.prompts[pid].pr;
         const a = pr.kind === 'choose' ? { type: 'answer', option: 0 }
           : pr.kind === 'opponent' ? { type: 'answer', target: pr.options[0] }
           : { type: 'answer', uids: pr.cards.slice(0, Math.min(pr.min, pr.cards.length)).map((c) => c.uid) };
-        try { this.act(pid, a); } catch { this.prompt = null; this.promptSrc = null; this.queue = []; }
+        try { this.act(pid, a); } catch { this.clearChoices(pid); }
         continue;
       }
       const p = this.active().find((x) => !this.ready[x.id]);
@@ -520,12 +542,16 @@ class Game {
     if (!a || typeof a.type !== 'string') fail('Неизвестное действие');
     if (a.type === 'forfeit') { this.forfeit(pid); return; }
     if (!this.isActive(pid)) fail('Сейчас не ваш ход');
-    if (this.prompt && this.prompt.pid !== pid) fail('Напарник делает выбор — подождите секунду');
-    if (this.prompt && a.type !== 'answer' && a.type !== 'undo') fail('Сначала завершите выбор');
+    const own = this.promptOf(pid);
+    if (own && a.type !== 'answer' && a.type !== 'undo') fail('Сначала завершите выбор');
+    if (!own && a.type === 'answer') fail('Нечего выбирать');
     const p = this.pl(pid);
     this.actorId = pid;
     this.lastEvent = null;
     if (a.type !== 'endTurn') delete this.ready[pid];
+    // если после чужого розыгрыша действует другой игрок — тот розыгрыш уже не отменить
+    const lastSnap = this.undoStack[this.undoStack.length - 1];
+    if (lastSnap && lastSnap.pid !== pid) this.undoStack = [];
     // покупка, атака, утилизация, база, конец хода — дальше отменять розыгрыш нельзя
     if (!['play', 'playAll', 'answer', 'undo'].includes(a.type)) this.undoStack = [];
 
@@ -534,7 +560,7 @@ class Game {
       case 'playAll': {
         const uids = p.hand.map((c) => c.uid);
         for (const uid of uids) {
-          if (this.prompt || this.over) break;
+          if (this.promptOf(pid) || this.over) break;
           if (p.hand.some((c) => c.uid === uid)) { this.actorId = pid; this.play(p, uid); }
         }
         break;
@@ -578,7 +604,7 @@ class Game {
     const returned = this.undoStack.slice(k).map((s) => s.uid);
     const names = returned.map((u) => { const c = [...p.inPlay, ...p.bases].find((x) => x.uid === u); return c ? `«${CARDS[c.cid].name}»` : null; }).filter(Boolean);
     Object.assign(this, snap.data);
-    this.queue = []; this.prompt = null; this.promptSrc = null;
+    this.clearChoices(p.id);
     this.log.length = Math.min(this.log.length, snap.logLen);
     this.undoStack = this.undoStack.slice(0, k);
     this.addLog(`${p.name} возвращает в руку ${names.join(', ')}`, 'sys');
@@ -693,31 +719,33 @@ class Game {
   }
 
   answer(p, a) {
-    const pr = this.prompt;
-    if (!pr) fail('Нечего выбирать');
+    const slot = this.prompts[p.id];
+    if (!slot) fail('Нечего выбирать');
+    const { pr, src } = slot;
     if (pr.kind === 'choose') {
       const i = Number(a.option);
       if (!(i >= 0 && i < pr.options.length)) fail('Неверный вариант');
-      const src = this.promptSrc;
-      this.prompt = null; this.promptSrc = null;
+      delete this.prompts[p.id];
       this.enqueueFront(pr.options[i], src, pr.pid);
     } else if (pr.kind === 'opponent') {
       if (!pr.options.includes(a.target)) fail('Неверный соперник');
       const t = this.pl(a.target);
+      delete this.prompts[p.id];
       t.pendingDiscard += pr.n;
       this.addLog(`${t.name} сбросит карту в начале своего хода`, 'warn');
-      this.prompt = null; this.promptSrc = null;
     } else if (pr.kind === 'pick') {
       const uids = Array.isArray(a.uids) ? [...new Set(a.uids)] : [];
       const allowed = new Set(pr.cards.map((c) => c.uid));
       if (uids.some((u) => !allowed.has(u))) fail('Эту карту выбрать нельзя');
       const min = Math.min(pr.min, pr.cards.length);
       if (uids.length < min || uids.length > pr.max) fail(pr.min === pr.max ? `Выберите ${cardsWord(pr.min)}` : `Выберите от ${min} до ${pr.max}`);
-      this.prompt = null;
-      this.handlePick(pr, uids);
-      this.promptSrc = null;
+      delete this.prompts[p.id];
+      this.handlePick(pr, uids, src);
     }
     this.process();
+    // все уже нажали «Завершить ход» и ждали только этого выбора
+    const act = this.active();
+    if (!this.over && act.length && act.every((x) => this.ready[x.id] && !this.prompts[x.id])) this.finishTurn();
   }
 
   // ── проекция для клиента ──
@@ -731,9 +759,11 @@ class Game {
     const me = this.pl(pid);
     const active = this.active();
     let prompt = null;
-    if (this.prompt) {
-      const owner = this.pl(this.prompt.pid);
-      prompt = this.prompt.pid === pid ? this.prompt : { waiting: true, pid: this.prompt.pid, text: `${owner ? owner.name : 'Игрок'} делает выбор…` };
+    if (this.prompts[pid]) prompt = this.prompts[pid].pr;
+    else {
+      const ids = Object.keys(this.prompts);
+      const other = ids.find((id) => me && this.pl(id) && this.pl(id).team === me.team) || ids[0];
+      if (other) { const owner = this.pl(other); prompt = { waiting: true, pid: other, text: `${owner ? owner.name : 'Игрок'} делает выбор…` }; }
     }
     const seesHand = (p) => p.id === pid || (this.mode === 'teams' && me && p.team === me.team);
     return {

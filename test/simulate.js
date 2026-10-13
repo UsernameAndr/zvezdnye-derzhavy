@@ -13,8 +13,11 @@ function totalCards(g) {
 }
 
 function botStep(g) {
-  const pr = g.prompt;
-  const p = pr ? g.pl(pr.pid) : pick(g.active().filter((x) => !g.ready[x.id] || Math.random() < 0.1));
+  // в 2×2 у каждого своё окно выбора: напарник может ходить, пока другой выбирает
+  const act = g.active();
+  const pool = act.filter((x) => g.promptOf(x.id) || !g.ready[x.id] || Math.random() < 0.1);
+  const p = pick(pool.length ? pool : act);
+  const pr = g.promptOf(p.id);
   g._bot = p.id;
   const und = g.undoable(p.id);
   if (und.length && Math.random() < 0.08) return { type: 'undo', uid: pick(und) };

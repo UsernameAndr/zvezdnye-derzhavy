@@ -236,14 +236,44 @@ t('2×2: союз срабатывает от карты напарника', ()
   assert.equal(g.pl('a1').hand.length, h + 1); // союз жалохвата: a1 берёт карту
 });
 
-t('2×2: пока напарник выбирает, второй ждёт; напарник видит руку', () => {
+t('2×2: пока напарник выбирает, второй играет дальше; напарник видит руку', () => {
   const g = teams();
-  g.pl('a1').hand = [c('m_patrol')]; g.pl('a2').hand = [c('scout')];
+  const t0 = g.turnNo;
+  g.pl('a1').hand = [c('m_patrol')]; g.pl('a2').hand = [c('scout'), c('m_patrol')];
   g.act('a1', { type: 'playAll' });
-  assert.equal(g.prompt.pid, 'a1');
-  assert.throws(() => g.act('a2', { type: 'playAll' }), /Напарник/);
+  assert.equal(g.promptOf('a1').kind, 'choose');
+  assert.ok(g.view('a2').prompt.waiting);
+  g.act('a2', { type: 'play', uid: g.pl('a2').hand[0].uid }); // скаут: окно у a1 не мешает
+  assert.equal(g.tradeOf('a2'), 1);
+  g.act('a2', { type: 'playAll' });                            // у a2 своё окно
+  assert.equal(g.promptOf('a2').kind, 'choose');
+  assert.equal(g.view('a1').prompt.kind, 'choose');            // каждый видит своё окно
+  assert.throws(() => g.act('a1', { type: 'endTurn' }), /выбор/);
+  g.act('a2', { type: 'answer', option: 0 });                  // деньги +3 себе
+  assert.equal(g.tradeOf('a2'), 4);
+  assert.equal(g.promptOf('a2').purpose, 'scrapHD');           // союз механоидов — тоже у a2
+  g.act('a2', { type: 'answer', uids: [] });
+  g.act('a2', { type: 'endTurn' });
+  assert.equal(g.turnNo, t0);                                   // ход не закончился, a1 ещё выбирает
+  g.act('a1', { type: 'answer', option: 1 });                  // урон +5
+  assert.equal(g.pool.combat, 5);
+  assert.equal(g.promptOf('a1').purpose, 'scrapHD');           // союз карты a1 ждал своей очереди
+  g.act('a1', { type: 'answer', uids: [] });
   assert.ok(g.view('a2').players.find((p) => p.id === 'a1').hand);
   assert.equal(g.view('b1').players.find((p) => p.id === 'a1').hand, null);
+  g.act('a1', { type: 'endTurn' });
+  assert.equal(g.turnNo, t0 + 1);
+});
+
+t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
+  const g = teams();
+  const t0 = g.turnNo;
+  g.pl('a1').hand = [c('m_patrol')]; g.pl('a2').hand = [c('m_patrol')];
+  g.act('a1', { type: 'playAll' }); g.act('a2', { type: 'playAll' });
+  assert.ok(g.promptOf('a1') && g.promptOf('a2'));
+  g.timeout();
+  assert.equal(g.turnNo, t0 + 1);
+  assert.deepEqual(g.prompts, {});
 });
 
 t('2×2: команда выбывает целиком, победа команды', () => {

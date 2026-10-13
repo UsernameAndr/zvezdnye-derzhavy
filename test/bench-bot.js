@@ -10,7 +10,7 @@ function play(nPlayers, mode, who) {
   const g = new Game(players, { authority: 50, mode, randomOrder: false });
   let s = 0;
   while (!g.over && s++ < 8000) {
-    const cands = g.prompt ? [g.prompt.pid] : g.active().map((p) => p.id);
+    const cands = g.active().map((p) => p.id);
     let acted = false;
     for (const pid of cands) {
       const a = (who[pid] === 'new' ? nb : ob).decide(g, pid, {});

@@ -9,7 +9,7 @@ function favs(p) {
 }
 function decide(g, pid) {
   const p = g.pl(pid);
-  const pr = g.prompt;
+  const pr = g.promptOf(pid);
   if (pr) {
     if (pr.pid !== pid) return null;
     if (pr.kind === 'choose') { const sc = pr.options.map((o) => o.reduce((s, e) => s + (e.combat || 0) * 1.1 + (e.trade || 0) + (e.auth || 0) * 0.4 + (e.draw || 0) * 2, 0)); return { type: 'answer', option: sc.indexOf(Math.max(...sc)) }; }

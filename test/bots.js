@@ -9,7 +9,7 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
 function randomMove(g, pid) {
   const p = g.pl(pid);
-  const pr = g.prompt;
+  const pr = g.promptOf(pid);
   if (pr) {
     if (pr.kind === 'choose') return { type: 'answer', option: 0 };
     if (pr.kind === 'opponent') return { type: 'answer', target: pr.options[0] };
@@ -33,7 +33,7 @@ function run(n, mode, botIds, opts = {}) {
   while (!g.over && steps < 6000) {
     steps++;
     // кто может ходить
-    const cands = g.prompt ? [g.prompt.pid] : g.active().map((p) => p.id);
+    const cands = g.active().map((p) => p.id).sort(() => Math.random() - 0.5);
     let acted = false;
     for (const pid of cands) {
       const isBot = botIds.includes(pid);
@@ -42,7 +42,7 @@ function run(n, mode, botIds, opts = {}) {
         const mate = g.players.find((x) => x.team === g.pl(pid).team && x.id !== pid && x.alive);
         const holdShared = mode === 'teams' && mate && !botIds.includes(mate.id) && !g.ready[mate.id];
         a = decide(g, pid, { holdShared });
-      } else if (!g.ready[pid] || g.prompt) a = randomMove(g, pid);
+      } else if (!g.ready[pid] || g.promptOf(pid)) a = randomMove(g, pid);
       if (!a) continue;
       try { g.act(pid, a); acted = true; break; }
       catch (e) {

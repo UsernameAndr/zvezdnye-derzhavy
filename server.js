@@ -73,22 +73,23 @@ function roomView(room, pid) {
     chat: room.chat.slice(-60),
     game: room.game ? room.game.view(pid) : null,
     turnLeft: room.game && !room.game.over && room.deadline ? Math.max(0, room.deadline - Date.now()) : null,
-    turnLimit: turnMs(room.game),
+    turnLimit: turnMs(room),
     you: pid,
   };
 }
 
-// ── таймер хода: 60 секунд ──
-const TURN_MS = (Number(process.env.TURN_SECONDS) || 60) * 1000;
-// в режиме 2 на 2 ход общий на двоих — времени вдвое больше
-const turnMs = (g) => (g && g.mode === 'teams' ? TURN_MS * 2 : TURN_MS);
+// ── таймер хода: хост выбирает «без ограничения» (по умолчанию), 1 или 2 минуты ──
+const turnMs = (room) => {
+  const v = room.settings && room.settings.turnTime;
+  return v === '60' || v === '120' ? Number(v) * 1000 : null;
+};
 function ensureTurnTimer(room) {
   const g = room.game;
-  if (!g || g.over) { clearTimeout(room.turnTimer); room.turnTimer = null; room.deadline = null; room.timerTurn = null; return; }
+  if (!g || g.over || !turnMs(room)) { clearTimeout(room.turnTimer); room.turnTimer = null; room.deadline = null; room.timerTurn = null; return; }
   if (room.timerTurn === g.turnNo) return;
   clearTimeout(room.turnTimer);
   room.timerTurn = g.turnNo;
-  const limit = turnMs(g);
+  const limit = turnMs(room);
   room.deadline = Date.now() + limit;
   const turn = g.turnNo;
   room.turnTimer = setTimeout(() => {
@@ -138,14 +139,14 @@ function scheduleBots(room) {
   if (room.botTimer || !room.game || room.game.over) return;
   if (!room.members.some((id) => { const x = byPid.get(id); return x && x.ws; })) return;
   const g = room.game;
-  const who = g.prompt ? [g.prompt.pid] : g.active().map((p) => p.id);
-  if (!who.some(isBotId)) return;
-  room.botTimer = setTimeout(() => { room.botTimer = null; botTick(room); }, g.prompt ? 650 : 800);
+  const who = g.active().map((p) => p.id).filter(isBotId);
+  if (!who.length) return;
+  room.botTimer = setTimeout(() => { room.botTimer = null; botTick(room); }, who.some((id) => g.promptOf(id)) ? 650 : 800);
 }
 function botTick(room) {
   const g = room.game;
   if (!g || g.over || !rooms.has(room.code)) return;
-  const who = g.prompt ? [g.prompt.pid] : g.active().map((p) => p.id);
+  const who = g.active().map((p) => p.id);
   for (const pid of who) {
     if (!isBotId(pid)) continue;
     const me = g.pl(pid);
@@ -224,7 +225,7 @@ const handlers = {
     const code = newCode();
     const room = {
       code, hostId: s.pid, members: [s.pid], game: null, chat: [], teams: { [s.pid]: 'A' },
-      settings: { authority: 50, maxPlayers: 4, randomOrder: true, mode: 'ffa', deckSize: 'auto' },
+      settings: { authority: 50, maxPlayers: 4, randomOrder: true, mode: 'ffa', deckSize: 'auto', turnTime: 'off' },
       lastActive: Date.now(),
     };
     rooms.set(code, room);
@@ -270,6 +271,7 @@ const handlers = {
       randomOrder: st.randomOrder === undefined ? room.settings.randomOrder : !!st.randomOrder,
       mode,
       deckSize: ['auto', '1', '1.5', '2'].includes(String(st.deckSize)) ? String(st.deckSize) : room.settings.deckSize,
+      turnTime: ['off', '60', '120'].includes(String(st.turnTime)) ? String(st.turnTime) : (room.settings.turnTime || 'off'),
     };
     broadcastRoom(room);
     broadcastList();

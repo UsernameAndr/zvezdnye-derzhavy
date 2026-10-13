@@ -44,7 +44,7 @@ function cardValue(g, p, cid) {
 function deckSize(p) { return p.deck.length + p.hand.length + p.discard.length + p.inPlay.length; }
 
 function answerPrompt(g, p) {
-  const pr = g.prompt;
+  const pr = g.promptOf(p.id);
   const enemies = g.opponents(p);
   if (pr.kind === 'choose') {
     // оцениваем варианты по ситуации
@@ -120,7 +120,7 @@ function decide(g, botId, opts = {}) {
   if (g.over) return null;
   const p = g.pl(botId);
   if (!p || !p.alive) return null;
-  if (g.prompt) return g.prompt.pid === botId ? answerPrompt(g, p) : null;
+  if (g.promptOf(botId)) return answerPrompt(g, p);
   if (!g.isActive(botId)) return null;
   if (g.ready[botId]) return null;
 
