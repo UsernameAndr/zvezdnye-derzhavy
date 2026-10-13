@@ -481,6 +481,27 @@ class Game {
     }
   }
 
+  // Время хода вышло: закрыть окна выбора вариантом по умолчанию и завершить ход за всех, кто ходит
+  timeout() {
+    if (this.over) return;
+    const turn = this.turnNo;
+    this.addLog('⏱ Время хода вышло — ход завершён', 'warn');
+    for (let i = 0; i < 50 && !this.over && this.turnNo === turn; i++) {
+      const pr = this.prompt;
+      if (pr) {
+        const pid = pr.pid;
+        const a = pr.kind === 'choose' ? { type: 'answer', option: 0 }
+          : pr.kind === 'opponent' ? { type: 'answer', target: pr.options[0] }
+          : { type: 'answer', uids: pr.cards.slice(0, Math.min(pr.min, pr.cards.length)).map((c) => c.uid) };
+        try { this.act(pid, a); } catch { this.prompt = null; this.promptSrc = null; this.queue = []; }
+        continue;
+      }
+      const p = this.active().find((x) => !this.ready[x.id]);
+      if (!p) { this.finishTurn(); break; }
+      this.act(p.id, { type: 'endTurn' });
+    }
+  }
+
   // Тайная правка значений (режим админа)
   adminSet(pid, v) {
     const p = this.pl(pid);

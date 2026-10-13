@@ -59,6 +59,7 @@
       case 'room': {
         const prevGame = S.room && S.room.game;
         S.room = m.room;
+        S.deadline = m.room.turnLeft != null ? Date.now() + m.room.turnLeft : null;
         if (S.autoBot && S.room.hostId === S.pid && !S.room.game) { S.autoBot = false; if (S.room.members.length === 1) send({ t: 'addBot' }); }
         if (S.room.code && history.replaceState) history.replaceState(null, '', '?room=' + S.room.code);
         if (prevGame && !S.room.game) closeModal();
@@ -259,7 +260,7 @@
       <li><b>Сыграйте карты из руки.</b> Они дают ${I.trade} деньги, ${I.combat} урон и ${I.auth} здоровье.</li>
       <li><b>Купите карты</b> из торгового ряда за деньги. Покупки уходят в ваш сброс и попадут в руку позже.</li>
       <li><b>Атакуйте</b> уроном соперника или его базы. Пока у соперника есть <b>аванпост</b>, сначала бейте его.</li>
-      <li><b>Завершите ход</b> — вы возьмёте 5 новых карт. Непотраченные деньги и урон сгорают.</li>
+      <li><b>Завершите ход</b> — вы возьмёте 5 новых карт. Непотраченные деньги и урон сгорают. На ход даётся <b>1 минута</b>, потом он завершится сам.</li>
       <li><b>Союз</b> — бонус, если в ход сыграно 2+ карты одной фракции. <b>Утиль</b> — убрать карту из игры ради эффекта.</li>
     </ol>`;
   }
@@ -642,7 +643,7 @@
     $('#board').innerHTML = `
       <header class="topbar">
         <div class="brand">Звёздные Державы <span>стол ${r.code}</span></div>
-        <div class="turn-pill ${myTurn ? 'mine' : ''}" style="--pc:${colorOf(cur.id)}">${turnLbl}</div>
+        <div class="turn-pill ${myTurn ? 'mine' : ''}" style="--pc:${colorOf(cur.id)}">${turnLbl}${g.over ? '' : ' <span class="turn-timer" aria-label="Осталось времени на ход"></span>'}</div>
         <div class="tb-btns">
           <button class="btn sm ghost" data-act="rules">Правила</button>
           <button class="btn sm ghost" data-act="menu">Меню</button>
@@ -662,6 +663,7 @@
       ${g.prompt && g.prompt.waiting ? `<div class="waiting-banner">${esc(g.prompt.text)}</div>` : ''}`;
 
     S.prevAuth = Object.fromEntries(g.players.map((p) => [p.id, p.authority]));
+    tickTimer();
     $('#side-opps').innerHTML = mqWide.matches ? `${mateHTML ? `<div class="zl">Напарник</div><div class="opps">${mateHTML}</div>` : ''}<div class="zl">Соперники</div><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}</div>` : '';
 
     const logEl = $('#side-log');
@@ -1075,6 +1077,16 @@
     document.addEventListener('touchmove', cancel, { passive: true });
   }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.modal && S.modal !== 'prompt') closeModal(); });
+
+  // обратный отсчёт времени хода
+  function tickTimer() {
+    const els = $$('.turn-timer');
+    if (!els.length) return;
+    const left = S.deadline ? Math.max(0, Math.ceil((S.deadline - Date.now()) / 1000)) : null;
+    const txt = left == null ? '' : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    for (const el of els) { el.textContent = txt; el.classList.toggle('low', left != null && left <= 10); }
+  }
+  setInterval(tickTimer, 500);
 
   // бесплатный сервер засыпает через 15 минут без запросов — пока вы за столом, страница его будит
   setInterval(() => { if (S.room) fetch('/health', { cache: 'no-store' }).catch(() => {}); }, 4 * 60 * 1000);

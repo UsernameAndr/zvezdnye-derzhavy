@@ -72,12 +72,37 @@ function roomView(room, pid) {
     admin: !!(byPid.get(pid) || {}).admin,
     chat: room.chat.slice(-60),
     game: room.game ? room.game.view(pid) : null,
+    turnLeft: room.game && !room.game.over && room.deadline ? Math.max(0, room.deadline - Date.now()) : null,
+    turnLimit: TURN_MS,
     you: pid,
   };
 }
 
+// ── таймер хода: 60 секунд ──
+const TURN_MS = (Number(process.env.TURN_SECONDS) || 60) * 1000;
+function ensureTurnTimer(room) {
+  const g = room.game;
+  if (!g || g.over) { clearTimeout(room.turnTimer); room.turnTimer = null; room.deadline = null; room.timerTurn = null; return; }
+  if (room.timerTurn === g.turnNo) return;
+  clearTimeout(room.turnTimer);
+  room.timerTurn = g.turnNo;
+  room.deadline = Date.now() + TURN_MS;
+  const turn = g.turnNo;
+  room.turnTimer = setTimeout(() => {
+    room.turnTimer = null;
+    if (!rooms.has(room.code) || room.game !== g || g.over || g.turnNo !== turn) return;
+    // ход ботов не ограничиваем — они ходят сами; если людей нет онлайн, партия на паузе
+    const anyoneOnline = room.members.some((id) => { const x = byPid.get(id); return x && x.ws; });
+    const humansActive = g.active().some((p) => !isBotId(p.id));
+    if (!anyoneOnline || !humansActive) { room.timerTurn = null; return; }
+    g.timeout();
+    broadcastRoom(room);
+  }, TURN_MS + 300);
+}
+
 function broadcastRoom(room) {
   room.lastActive = Date.now();
+  ensureTurnTimer(room);
   for (const pid of room.members) {
     const s = byPid.get(pid);
     if (s && s.ws) send(s.ws, { t: 'room', room: roomView(room, pid) });

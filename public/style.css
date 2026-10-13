@@ -427,3 +427,10 @@ button.stat:hover { border-color: #4a5870; }
 .avatar.xs { width: 20px; height: 20px; font-size: 11px; }
 .team-card .zl { margin: 2px 0 0; }
 .opp-chip.team .oc-name { max-width: 200px; }
+
+/* таймер хода */
+.turn-timer { font-variant-numeric: tabular-nums; margin-left: 6px; padding: 0 6px; border-radius: 3px; background: rgba(0, 0, 0, .18); }
+.turn-pill:not(.mine) .turn-timer { background: rgba(255, 255, 255, .06); }
+.turn-timer:empty { display: none; }
+.turn-timer.low { background: var(--danger); color: #fff; animation: tpulse 1s infinite; }
+@keyframes tpulse { 50% { opacity: .6; } }
