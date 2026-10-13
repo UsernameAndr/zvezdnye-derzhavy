@@ -93,6 +93,8 @@ class Game {
     this.purse = {};     // деньги каждого игрока в этот ход
     this.topNextBy = {}; // «следующий корабль — на верх колоды» у каждого игрока
     this.queues = {};   // очередь эффектов у каждого игрока
+    this.turnStats = { buys: {}, dmg: {}, killed: [] }; // что произошло за текущий ход (для короткой сводки)
+    this.history = [];  // сводки прошлых ходов
     this.prompts = {};  // открытое окно выбора у каждого игрока: pid → { pr, src }
     this.over = false;
     this.winner = null;
@@ -346,6 +348,7 @@ class Game {
             const b = o.bases.splice(i, 1)[0];
             o.discard.push(clean(b));
             this.addLog(`${p.name} уничтожает базу «${def(b).name}» игрока ${o.name}`, 'attack');
+            this.turnStats.killed.push({ owner: o.id, cid: b.cid });
             this.lastEvent = { type: 'baseDestroyed', target: o.id, uid };
           }
         }
@@ -404,6 +407,7 @@ class Game {
     this.undoStack = [];
     this.queues = {};
     this.prompts = {};
+    this.turnStats = { buys: {}, dmg: {}, killed: [] };
     this.addLog(this.mode === 'teams' ? `Ход команды: ${act.map((p) => p.name).join(' и ')}` : `Ход игрока ${act[0].name}`, 'turn');
     for (const p of act) {
       if (p.pendingDiscard > 0) {
@@ -445,6 +449,7 @@ class Game {
   }
 
   finishTurn() {
+    this.pushSummary();
     for (const p of this.active()) {
       p.discard.push(...p.hand.map(clean), ...p.inPlay.map(clean));
       p.hand = [];
@@ -456,6 +461,16 @@ class Game {
     this.prompts = {};
     this.turnIdx = this.nextTeamIdx();
     this.startTurn();
+  }
+
+  // Короткая сводка хода: кто что купил и построил, кому сколько урона, какие базы уничтожены
+  pushSummary() {
+    const act = this.active();
+    const st = this.turnStats;
+    const built = {};
+    for (const p of act) { const b = p.bases.filter((c) => c.playedTurn === this.turnNo).map((c) => c.cid); if (b.length) built[p.id] = b; }
+    this.history.push({ turnNo: this.turnNo, actors: act.map((p) => p.id), team: act[0] ? act[0].team : null, buys: st.buys, built, dmg: st.dmg, killed: st.killed });
+    if (this.history.length > 12) this.history.shift();
   }
 
   // Команда (в ffa — игрок) выбывает
@@ -581,7 +596,7 @@ class Game {
   snapshot(uid, pid) {
     return {
       uid, pid, revealSeq: this.revealSeq, logLen: this.log.length,
-      data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext, purse: this.purse, topNextBy: this.topNextBy })),
+      data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext, purse: this.purse, topNextBy: this.topNextBy, turnStats: this.turnStats })),
     };
   }
 
@@ -650,6 +665,7 @@ class Game {
       this.refillRow(i);
     }
     this.addTrade(p.id, -d.cost);
+    (this.turnStats.buys[p.id] = this.turnStats.buys[p.id] || []).push(d.id || (slot === 'explorer' ? 'explorer' : card.cid));
     if (d.type === 'ship' && (this.topNextBy[p.id] || 0) > 0) {
       this.topNextBy[p.id]--;
       this.topNext--;
@@ -700,6 +716,7 @@ class Game {
     t.bases.splice(t.bases.indexOf(b), 1);
     t.discard.push(clean(b));
     this.addLog(`${p.name} уничтожает ${d.outpost ? 'аванпост' : 'базу'} «${d.name}» игрока ${t.name}`, 'attack');
+    this.turnStats.killed.push({ owner: t.id, cid: b.cid });
     this.lastEvent = { type: 'baseDestroyed', target: t.id, uid };
   }
 
@@ -713,6 +730,7 @@ class Game {
     amount = Math.min(amount, t.authority); // лишний урон не сгорает — остаётся на другие цели
     this.pool.combat -= amount;
     this.changeHp(t, -amount);
+    this.turnStats.dmg[t.id] = (this.turnStats.dmg[t.id] || 0) + amount;
     this.addLog(`${p.name} атакует ${this.mode === 'teams' ? `команду ${this.teamNames(t.team)}` : t.name}: −${amount} (осталось ${Math.max(0, t.authority)})`, 'attack');
     this.lastEvent = { type: 'hit', target: t.id, amount };
     if (t.authority <= 0) this.eliminateTeam(t.team, `💥 ${this.mode === 'teams' ? `Команда ${this.teamNames(t.team)} теряет` : `${t.name} теряет`} всё здоровье и выбывает!`);
@@ -796,6 +814,7 @@ class Game {
       winners: this.winners,
       settings: this.settings,
       lastEvent: this.lastEvent,
+      history: this.history.slice(-8),
     };
   }
 }

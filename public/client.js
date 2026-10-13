@@ -27,6 +27,7 @@
     pendingJoin: (new URLSearchParams(location.search).get('room') || '').toUpperCase(),
     prevAuth: {}, wasMyTurn: false, modal: null, sound: store.get('sd_sound') !== '0',
     goShown: false, tutorialShown: false,
+    hints: store.get('sd_hints') === '1',
   };
   const isTouch = matchMedia('(hover: none)').matches;
   const mqMobile = matchMedia('(max-width: 760px)');
@@ -172,6 +173,18 @@
   }
 
   // ───────────────── карты ─────────────────
+  // одинаковые базы одного владельца — одной картой с отметкой «×N»
+  function stacks(list) {
+    const out = [], by = {};
+    for (const b of list) {
+      const k = b.copied || b.cid;
+      if (!by[k]) { by[k] = { all: [] }; out.push(by[k]); }
+      by[k].all.push(b);
+    }
+    return out;
+  }
+  const stackBadge = (n) => (n > 1 ? `<span class="stack-n" title="Одинаковых карт: ${n}">×${n}</span>` : '');
+
   function cardHTML(c, o = {}) {
     const cid = c.copied || c.cid;
     const d = CARDS[cid];
@@ -183,7 +196,7 @@
     const attrs = `data-cid="${cid}" ${c.uid ? `data-uid="${c.uid}"` : ''} ${o.attrs || ''}`;
     const art = `<img class="c-art" src="${window.cardArtURL(cid)}" alt="" draggable="false">`;
     const cls = `card ${size} f-${d.faction} ${base ? 'is-base' : ''} ${d.outpost ? 'is-outpost' : ''} ${o.undo ? 'has-undo' : ''} ${o.cls || ''}`;
-    const undoBtn = o.undo ? `<button class="c-undo" data-act="undo" data-uid="${c.uid}" title="Вернуть карту в руку" aria-label="Вернуть карту в руку">×</button>` : '';
+    const undoBtn = o.undo ? `<button class="c-undo" data-act="undo" data-uid="${o.undoUid || c.uid}" title="Вернуть карту в руку" aria-label="Вернуть карту в руку">×</button>` : '';
     const defBadge = base ? `<span class="c-def ${d.outpost ? 'out' : ''}" title="${d.outpost ? 'Аванпост — защищает владельца' : 'Защита базы'}">${d.defense}</span>` : '';
     if (size === 'mini') {
       return `<div class="${cls}" ${attrs} style="${style}">${art}
@@ -312,6 +325,7 @@
           <div class="sec-title">Открытые столы</div>
           <div id="h-rooms" class="room-list"></div>
           <button class="btn ghost" data-act="rules">Правила игры</button>
+          ${isStandalone() ? '' : '<button class="btn ghost" data-act="install">Добавить значок на экран</button>'}
         </div>
       </div>`;
       $('#h-name').addEventListener('input', (e) => { S.name = e.target.value.trim(); store.set('sd_name', S.name); });
@@ -450,6 +464,53 @@
     return { r, g, me, cur, actives, myTurn, blocked, ready, mate, teams, colorOf, hasOutpost, isEnemy, curName, host: r.hostId === S.pid };
   }
 
+  // Короткая сводка ходов соперников с момента вашего прошлого хода
+  function turnNews(C) {
+    const { g, me } = C;
+    const hist = g.history || [];
+    const list = [];
+    for (let i = hist.length - 1; i >= 0 && list.length < 5; i--) {
+      if (me && hist[i].team === me.team) break;
+      list.unshift(hist[i]);
+      if (!me) break;
+    }
+    if (!list.length) return '';
+    const P = (id) => g.players.find((x) => x.id === id);
+    const nm = (id) => esc((P(id) || {}).name || '?');
+    const cards = (arr) => {
+      const n = {}; arr.forEach((c) => { n[c] = (n[c] || 0) + 1; });
+      return Object.entries(n).map(([c, k]) => `${esc(CARDS[c].name)}${k > 1 ? ` ×${k}` : ''}`).join(', ');
+    };
+    const mine = (id) => me && P(id) && P(id).team === me.team;
+    const lines = list.map((h) => {
+      const own = h.actors.map((id) => {
+        const p = [];
+        if ((h.buys[id] || []).length) p.push(`покупки: ${cards(h.buys[id])}`);
+        if ((h.built[id] || []).length) p.push(`базы: ${cards(h.built[id])}`);
+        return { id, text: p.join('; ') };
+      });
+      const tail = [];
+      const byTeam = {};
+      for (const [id, n] of Object.entries(h.dmg || {})) { const t = P(id); if (t) { byTeam[t.team] = byTeam[t.team] || { n: 0, id }; byTeam[t.team].n += n; } }
+      for (const { n, id } of Object.values(byTeam)) {
+        const tgt = mine(id) ? (C.teams ? 'вашей команде' : 'вам') : C.teams ? `команде ${esc(g.players.filter((x) => x.team === P(id).team).map((x) => x.name).join(' и '))}` : nm(id);
+        tail.push(`<span class="nd">урон ${n} ${tgt}</span>`);
+      }
+      const lostMine = (h.killed || []).filter((k) => mine(k.owner)).map((k) => k.cid);
+      if (lostMine.length) tail.push(`<span class="nd">${lostMine.length > 1 ? `уничтожены ваши базы: ${cards(lostMine)}` : `уничтожена ваша база «${esc(CARDS[lostMine[0]].name)}»`}</span>`);
+      const lostOther = {};
+      for (const k of (h.killed || []).filter((x) => !mine(x.owner))) (lostOther[k.owner] = lostOther[k.owner] || []).push(k.cid);
+      for (const [o, list] of Object.entries(lostOther)) tail.push(list.length > 1 ? `уничтожены базы (${nm(o)}): ${cards(list)}` : `уничтожена база «${esc(CARDS[list[0]].name)}» (${nm(o)})`);
+      if (h.actors.length > 1) {
+        const segs = own.map((o) => `<b>${nm(o.id)}</b>: ${o.text || 'без покупок'}`);
+        return `<div class="nl">${[...segs, ...tail].join(' · ')}</div>`;
+      }
+      const parts = [own[0] && own[0].text, ...tail].filter(Boolean);
+      return `<div class="nl"><b>${nm(h.actors[0])}</b>: ${parts.join(' · ') || 'без покупок и атак'}</div>`;
+    });
+    return `<div class="news">${lines.join('')}</div>`;
+  }
+
   const teamOf = (C, p) => C.g.players.filter((x) => x.team === p.team);
   const teamTitle = (C, p) => teamOf(C, p).map((x) => esc(x.name)).join(' и ');
 
@@ -520,7 +581,12 @@
     const tip = coach(C);
     if (myTurn && !blocked && (g.undoable || []).length && !me.hand.length) tip.text += ' <span class="muted">Ошиблись с картой? Крестик на ней вернёт её в руку.</span>';
     if (teams && myTurn && !blocked && !C.ready && tip.cue) tip.text += ' <span class="muted">Урон общий с напарником, деньги у каждого свои.</span>';
-    if (myTurn && g.prompt && g.prompt.waiting) tip.text += ` <span class="muted">${esc(g.prompt.text)} Вы можете ходить дальше.</span>`;
+    const waitNote = myTurn && g.prompt && g.prompt.waiting ? `${esc(g.prompt.text)} Вы можете ходить дальше.` : '';
+    if (waitNote) tip.text += ` <span class="muted">${waitNote}</span>`;
+    if (!S.hints) tip.cue = '';
+    const news = turnNews(C);
+    const infoHTML = S.hints ? `<div class="hint ${myTurn ? 'mine' : ''}">${tip.text}</div>${news}`
+      : `${news}${waitNote ? `<div class="news"><div class="nl">${waitNote}</div></div>` : ''}`;
     const combat = g.pool.combat, trade = g.pool.trade;
 
     // соперники
@@ -541,9 +607,10 @@
           ${canAtk || anyBaseTarget ? '<span class="oc-atk">⚔</span>' : ''}
         </button>`;
       }
-      const bases = p.bases.map((b) => {
+      const bases = stacks(p.bases).map(({ all }) => {
+        const b = all[0];
         const can = canAttackBase(C, p, b);
-        return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}` });
+        return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}`, badge: stackBadge(all.length) });
       }).join('');
       const atk = canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${p.id}">Атаковать</button>` : '';
       return `<div class="opp ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
@@ -596,30 +663,37 @@
     // сыгранное
     const isMe = myTurn;
     const ps = mobile ? 'mini' : 'sm';
-    const playHTML = C.actives.map((pp) => pp.inPlay.map((c) => {
+    // одинаковые сыгранные карты — одной картой «×N»; крестик возвращает последнюю из них
+    const playHTML = C.actives.map((pp) => stacks(pp.inPlay).map(({ all }) => {
+      const c = all[0];
       const d = CARDS[c.copied || c.cid];
       const mine = pp.id === S.pid;
-      const acts = mine && myTurn && !blocked && d.scrap.length ? `<button class="mini-btn" data-act="scrap" data-uid="${c.uid}">Утилизировать</button>` : '';
-      return cardHTML(c, { size: ps, actions: acts, attrs: `data-zone="${mine ? 'play' : 'mateplay'}"`, undo: mine && myTurn && (g.undoable || []).includes(c.uid), badge: teams && !mine ? `<span class="owner-tag">${esc(pp.name)}</span>` : '' });
+      const undoUid = mine && myTurn ? [...all].reverse().map((x) => x.uid).find((u) => (g.undoable || []).includes(u)) : null;
+      const acts = mine && myTurn && !blocked && d.scrap.length ? `<button class="mini-btn" data-act="scrap" data-uid="${c.uid}">${mobile ? 'Утиль' : 'Утилизировать'}</button>` : '';
+      return cardHTML(c, { size: ps, actions: acts, attrs: `data-zone="${mine ? 'play' : 'mateplay'}"`, undo: !!undoUid, undoUid, badge: (teams && !mine ? `<span class="owner-tag">${esc(pp.name)}</span>` : '') + stackBadge(all.length) });
     }).join('')).join('');
 
     // моя зона
     let mineHTML = '', basesZone = '';
     if (me) {
-      const bases = me.bases.map((b) => {
-        const d = CARDS[b.cid]; const used = b.used || {};
+      const bases = stacks(me.bases).map(({ all }) => {
+        const d = CARDS[all[0].cid];
+        // способность каждой из одинаковых баз — отдельным нажатием, пока есть неиспользованные
+        const ready = all.filter((b) => d.primary.length && !(b.used && b.used.primary));
+        const b = ready[0] || all[0];
+        const undoUid = [...all].reverse().map((x) => x.uid).find((u) => (g.undoable || []).includes(u));
         let acts = '';
         if (myTurn && !blocked) {
-          if (d.primary.length && !used.primary) acts += `<button class="mini-btn use" data-act="activate" data-uid="${b.uid}">Использовать</button>`;
-          if (d.scrap.length) acts += `<button class="mini-btn" data-act="scrap" data-uid="${b.uid}">Утилизировать</button>`;
+          if (ready.length) acts += `<button class="mini-btn use" data-act="activate" data-uid="${b.uid}">${mobile ? 'Исп.' : 'Использовать'}${all.length > 1 ? ` (${ready.length})` : ''}</button>`;
+          if (d.scrap.length) acts += `<button class="mini-btn" data-act="scrap" data-uid="${b.uid}">${mobile ? 'Утиль' : 'Утилизировать'}</button>`;
         }
-        return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"', undo: myTurn && (g.undoable || []).includes(b.uid), badge: teams ? '<span class="owner-tag">ваша</span>' : '' });
-      }).join('') + (teams && mate && mate.alive ? mate.bases.map((b) => cardHTML(b, { size: ps, attrs: 'data-zone="matebase"', badge: `<span class="owner-tag">${esc(mate.name)}</span>` })).join('') : '');
+        return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"', undo: myTurn && !!undoUid, undoUid, badge: (teams ? '<span class="owner-tag">ваша</span>' : '') + stackBadge(all.length) });
+      }).join('') + (teams && mate && mate.alive ? stacks(mate.bases).map(({ all }) => cardHTML(all[0], { size: ps, attrs: 'data-zone="matebase"', badge: `<span class="owner-tag">${esc(mate.name)}</span>` + stackBadge(all.length) })).join('') : '');
       const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
       const top = me.discard[me.discard.length - 1];
       basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''} ${bases ? '' : 'empty'}"><div class="zl">${teams ? `Базы команды${g.players.some((x) => x.team === me.team && x.alive && x.bases.some((b) => CARDS[b.cid].outpost)) ? ' · 🛡 аванпост защищает вас обоих' : ''}` : 'Ваши базы'}</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
       mineHTML = `
-        <div class="hint ${myTurn ? 'mine' : ''}">${tip.text}</div>
+        <div class="spacer"></div>${infoHTML}
         <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''} ${hand ? '' : 'empty'}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
         <section class="actionbar ${myTurn ? 'my-turn' : ''}" style="--pc:${colorOf(me.id)}">
           <div class="stats">
@@ -638,7 +712,7 @@
           </div>
         </section>`;
     } else {
-      mineHTML = '<div class="hint">Вы наблюдаете за партией.</div>';
+      mineHTML = `<div class="spacer"></div>${news}<div class="hint">Вы наблюдаете за партией.</div>`;
     }
 
     const turnLbl = g.over ? 'Партия окончена' : myTurn ? (teams && mate && mate.alive && !mobile ? `Ваш ход · напарник: ${esc(mate.name)}` : 'Ваш ход') : mobile && teams ? `Ходят ${esc(C.actives.map((x) => x.name).join(', '))}` : `Ходит ${C.curName}`;
@@ -718,18 +792,19 @@
         <span class="oc-meta">${alive.length ? `<span class="hp ${hp <= 10 ? 'low' : ''}">${I.auth}${hp}</span><span>баз ${bases.length}${C.hasOutpost(p) ? ' 🛡' : ''}</span>` : 'выбыла'}</span></span>
         ${canAtk || anyBaseTarget ? '<span class="oc-atk">⚔</span>' : ''}</button>`;
     }
-    const bHTML = bases.map(({ m, b }) => {
+    const bHTML = alive.flatMap((m) => stacks(m.bases).map(({ all }) => {
+      const b = all[0];
       const can = canAttackBase(C, m, b);
-      return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${m.id}" ${can ? `data-act="atkbase" data-target="${m.id}"` : ''}`, badge: `<span class="owner-tag">${esc(m.name)}</span>` });
-    }).join('');
+      return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${m.id}" ${can ? `data-act="atkbase" data-target="${m.id}"` : ''}`, badge: `<span class="owner-tag">${esc(m.name)}</span>` + stackBadge(all.length) });
+    })).join('');
     return `<div class="opp team-card ${isTurn ? 'turn' : ''} ${alive.length ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
       <div class="opp-head g2 noav"><div class="nm-line"><b>Команда соперников</b></div>
         <div class="hp-badge ${hp <= 10 ? 'low' : ''}" title="Здоровье команды">${hp}</div>
         <div class="opp-meta">${alive.length ? `баз ${bases.length}${C.hasOutpost(p) ? ' · 🛡' : ''}` : 'выбыла'}</div>
         ${alive.length && canAtk ? `<div class="atk"><button class="btn danger sm" data-act="atkplayer" data-target="${target.id}">Атаковать</button></div>` : ''}</div>
       <div class="tm-list">${members.map(memberLine).join('')}</div>
-      ${alive.length ? `<div class="zl">Базы команды${C.hasOutpost(p) ? ' · <span class="tag-s">🛡 аванпост защищает команду</span>' : ''}</div>
-        <div class="opp-bases">${bHTML || '<span class="none">нет баз</span>'}</div>
+      ${alive.length ? `${bHTML ? `<div class="zl">Базы команды${C.hasOutpost(p) ? ' · <span class="tag-s">🛡 аванпост защищает команду</span>' : ''}</div>
+        <div class="opp-bases">${bHTML}</div>` : ''}
         ${!canAtk && C.hasOutpost(p) && myTurn && combat > 0 ? '<div class="muted small">Сначала уничтожьте аванпост</div>' : ''}`
       : `<div class="muted">команда выбыла${p.place ? ` · ${p.place} место` : ''}</div>`}
     </div>`;
@@ -825,9 +900,10 @@
     const members = C.teams ? teamOf(C, p).filter((m) => m.alive) : [p];
     const target = members[0] || p;
     const canAtk = C.myTurn && !C.blocked && target.alive && C.g.pool.combat > 0 && !C.hasOutpost(p);
-    const bases = members.flatMap((m) => m.bases.map((b) => {
+    const bases = members.flatMap((m) => stacks(m.bases).map(({ all }) => {
+      const b = all[0];
       const can = canAttackBase(C, m, b);
-      return `<div class="ob">${cardHTML(b, { size: 'sm', attrs: `data-zone="oppbase" data-owner="${m.id}"`, badge: C.teams ? `<span class="owner-tag">${esc(m.name)}</span>` : '' })}${can ? `<button class="btn danger sm" data-act="atkbase" data-target="${m.id}" data-uid="${b.uid}">Уничтожить (${CARDS[b.cid].defense})</button>` : ''}</div>`;
+      return `<div class="ob">${cardHTML(b, { size: 'sm', attrs: `data-zone="oppbase" data-owner="${m.id}"`, badge: (C.teams ? `<span class="owner-tag">${esc(m.name)}</span>` : '') + stackBadge(all.length) })}${can ? `<button class="btn danger sm" data-act="atkbase" data-target="${m.id}" data-uid="${b.uid}">Уничтожить (${CARDS[b.cid].defense})</button>` : ''}</div>`;
     })).join('');
     const stats = members.map((m) => `<span>${C.teams ? `<b>${esc(m.name)}</b>: ` : ''}в руке ${m.handCount} · в колоде ${m.deckCount} · <button class="lnk" data-act="view-discard" data-pid="${m.id}">сброс ${m.discard.length}</button></span>`).join('');
     const html = `<h3>${C.teams ? 'Команда: ' + teamTitle(C, p) : esc(p.name)}</h3>
@@ -855,7 +931,7 @@
     const p = C.mate;
     if (!p) return;
     const hand = (p.hand || []).map((c) => cardHTML(c, { size: 'sm', attrs: 'data-zone="matehand"' })).join('');
-    const bases = p.bases.map((b) => cardHTML(b, { size: 'sm', attrs: 'data-zone="matebase"' })).join('');
+    const bases = stacks(p.bases).map(({ all }) => cardHTML(all[0], { size: 'sm', attrs: 'data-zone="matebase"', badge: stackBadge(all.length) })).join('');
     const html = `<h3>${esc(p.name)} — напарник</h3>
       <div class="os-stats"><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>${(C.g.ready || []).includes(p.id) ? '<span class="ok">готов завершить ход</span>' : ''}</div>
       <div class="sec-title">Рука</div><div class="ob-grid">${hand || '<span class="none">Пусто</span>'}</div>
@@ -955,9 +1031,11 @@
     const g = S.room.game;
     const me = g.players.find((p) => p.id === S.pid);
     openModal(`<h3>Меню</h3><div class="menu-list">
+      <button class="btn" data-act="toggle-hints">${S.hints ? 'Подсказки: включены' : 'Подсказки: выключены'}</button>
       <button class="btn" data-act="toggle-sound">${S.sound ? 'Звук начала хода: включён' : 'Звук начала хода: выключен'}</button>
       <button class="btn" data-act="copy-link">Скопировать ссылку на стол</button>
       <button class="btn" data-act="tutorial">Как сделать ход</button>
+      ${isStandalone() ? '' : '<button class="btn" data-act="install">Добавить значок на экран</button>'}
       <button class="btn ghost" data-act="admin">${S.room.admin ? 'Режим админа (включён)' : 'Режим админа'}</button>
       ${me && me.alive && !g.over ? '<button class="btn danger" data-act="forfeit">Сдаться</button>' : ''}
       ${!me || !me.alive || g.over ? '<button class="btn" data-act="leave">Выйти из-за стола</button>' : ''}
@@ -1012,6 +1090,8 @@
       case 'tutorial': showTutorial(); break;
       case 'tutorial-ok': store.set('sd_tutorial', '1'); closeModal(); render(); break;
       case 'menu': showMenu(); break;
+      case 'install': installApp(); break;
+      case 'toggle-hints': S.hints = !S.hints; store.set('sd_hints', S.hints ? '1' : '0'); closeModal(); render(); toast(S.hints ? 'Подсказки включены' : 'Подсказки выключены — включить можно в меню'); break;
       case 'toggle-sound': S.sound = !S.sound; store.set('sd_sound', S.sound ? '1' : '0'); showMenu(); break;
       case 'forfeit': confirmBox('Сдаться и выйти из партии?', 'Сдаться', () => act({ type: 'forfeit' }), true); break;
       case 'tolobby': closeModal(); send({ t: 'toLobby' }); break;
@@ -1110,6 +1190,24 @@
 
   // бесплатный сервер засыпает через 15 минут без запросов — пока вы за столом, страница его будит
   setInterval(() => { if (S.room) fetch('/health', { cache: 'no-store' }).catch(() => {}); }, 4 * 60 * 1000);
+
+  // ── значок на экране (приложение) ──
+  function isStandalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.installEvt = e; });
+  window.addEventListener('appinstalled', () => { S.installEvt = null; toast('Значок добавлен — игру можно открывать с экрана'); });
+  function installApp() {
+    if (S.installEvt) { const e = S.installEvt; S.installEvt = null; closeModal(); e.prompt(); return; }
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    openModal(`<h3>Значок на экране</h3>
+      <p>Игра откроется как приложение — во весь экран, без адресной строки.</p>
+      <ul class="inst">
+        ${ios ? '<li><b>iPhone / iPad (Safari):</b> кнопка «Поделиться» внизу → «На экран „Домой“» → «Добавить».</li>' : ''}
+        <li><b>Android (Chrome):</b> меню ⋮ справа вверху → «Добавить на главный экран» или «Установить приложение».</li>
+        ${ios ? '' : '<li><b>iPhone (Safari):</b> «Поделиться» → «На экран „Домой“».</li>'}
+        <li><b>Ноутбук (Chrome, Edge, Яндекс):</b> значок установки справа в адресной строке или меню ⋮ → «Установить Звёздные Державы».</li>
+      </ul>`, { kind: 'install', sheet: isMobile() });
+  }
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   connect();
 })();

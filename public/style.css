@@ -191,7 +191,7 @@ input:focus { border-color: #5c7aa3; }
 .top-row { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
 .top-row .market { flex: none; max-width: 100%; }
 .opps-area { flex: 1 1 230px; min-width: 230px; display: flex; flex-direction: column; gap: 8px; max-height: calc(var(--cw) * 1.4 + 34px); overflow-y: auto; scrollbar-width: thin; }
-.opps-area .opps { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
+.opps-area .opps { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
 .opps-area .opp { padding: 6px 8px; gap: 3px; }
 .opps-area .opp-bases { min-height: 0; }
 .opps-area .opp-bases .none { display: none; }
@@ -379,7 +379,7 @@ button.stat:hover { border-color: #4a5870; }
   .play-zone .strip { flex-wrap: wrap; overflow-y: auto; max-height: calc(var(--mw) * 2.8 + 6px); }
   .top-row .market { flex: 1 1 100%; }
   /* свободное место — над подсказкой, рука и кнопки прижаты к низу */
-  .board > .hint { margin-top: auto; }
+  .board > .spacer { display: block; flex: 1 1 0; }
   .hand-zone.empty .hand { min-height: 34px; align-items: center; }
   /* чья карта — маленькой подписью сверху, чтобы не закрывать цифры */
   .card.mini .owner-tag { top: 0; bottom: auto; font-size: 7.5px; padding: 0 2px; background: rgba(5, 7, 12, .75); }
@@ -481,3 +481,21 @@ button.stat:hover { border-color: #4a5870; }
 .opps-area .hp-badge { padding: 0 6px; }
 .opps-area .tag-s { padding: 0 4px; }
 .adm-targets { margin-top: -4px; }
+/* стопка одинаковых баз */
+.stack-n { position: absolute; top: 3px; left: 50%; transform: translateX(-50%); z-index: 3; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 12px; line-height: 1.3; padding: 0 6px; border-radius: 4px; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+.card.mini .stack-n { font-size: 10px; padding: 0 4px; }
+
+/* короткая сводка ходов соперников */
+.spacer { display: none; }
+.news { background: #141925; border: 1px solid var(--line); border-left: 3px solid #4a5870; border-radius: 6px; padding: 5px 10px; font-size: 13px; color: #c3cad7; display: flex; flex-direction: column; gap: 2px; }
+.news .nl { line-height: 1.35; }
+.news b { color: var(--text); }
+.news .nd { color: #ff9c90; }
+@media (max-width: 760px) { .news { font-size: 12px; padding: 4px 8px; } }
+.inst { padding-left: 18px; display: flex; flex-direction: column; gap: 8px; margin: 10px 0 0; }
+.stack-n { top: 26%; left: auto; right: 4px; transform: none; }
+/* компактнее карточки команды соперников и напарника на ноутбуке */
+.opps-area .team-card .tm-list { flex-direction: row; flex-wrap: wrap; column-gap: 12px; row-gap: 2px; }
+.opps-area .tm-mem { font-size: 12px; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
+.opps-area .team-card > .zl { display: none; }
+.opps-area .opp-bases { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }

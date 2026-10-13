@@ -265,6 +265,24 @@ t('2×2: пока напарник выбирает, второй играет �
   assert.equal(g.turnNo, t0 + 1);
 });
 
+t('сводка хода: покупки, урон, построенные и уничтоженные базы', () => {
+  const { g } = setup(2, ['t_post', 'scout']);
+  g.pl('p1').bases.push({ uid: 'ob1', cid: 'b_hive' });
+  g.act('p0', { type: 'playAll' });
+  if (g.promptOf('p0')) g.act('p0', { type: 'answer', option: 1 });
+  g.pool.combat = 20; g.purse.p0 = 2;
+  g.act('p0', { type: 'buy', slot: 'explorer' });
+  g.act('p0', { type: 'attackBase', target: 'p1', uid: 'ob1' });
+  g.act('p0', { type: 'attackPlayer', target: 'p1', amount: 6 });
+  g.act('p0', { type: 'endTurn' });
+  const h = g.view('p1').history.slice(-1)[0];
+  assert.deepEqual(h.actors, ['p0']);
+  assert.deepEqual(h.buys.p0, ['explorer']);
+  assert.deepEqual(h.built.p0, ['t_post']);
+  assert.equal(h.dmg.p1, 6);
+  assert.deepEqual(h.killed, [{ owner: 'p1', cid: 'b_hive' }]);
+});
+
 t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
   const g = teams();
   const t0 = g.turnNo;
