@@ -334,3 +334,4 @@ t('2×2: базой пользуется только владелец, защи
   g.pool.combat = 10;
   assert.throws(() => g.act('b1', { type: 'attackPlayer', target: 'a2', amount: 5 }), /аванпост/);
 });
+

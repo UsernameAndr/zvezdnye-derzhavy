@@ -5,6 +5,11 @@
  * бот разыгрывает свои карты и покупает на свои деньги, а общий урон оставляет напарнику.
  */
 const { CARDS } = require('../public/cards.js');
+// Ценность покупок, выученная на самоигре (test/learn-cards.js): карта → [начало, середина, конец].
+// Это прирост шанса победы от покупки карты по сравнению с отказом от покупки в той же ситуации.
+let LEARNED = {};
+try { LEARNED = require('./card-values.json'); } catch { LEARNED = {}; }
+const W = { synergy: 0, focus: 0, outpostDanger: 0.6, minValue: 0.4, teamMinValue: 0.25, teamPace: 1.4, baseKill: 1 };
 
 const def = (c) => CARDS[c.copied || c.cid];
 const val = (e) => {
@@ -39,6 +44,47 @@ function cardValue(g, p, cid) {
   if (d.type === 'base') v += d.defense * 0.25 + (d.outpost ? 1 : 0);
   if (d.fleetHQ || d.allAlly) v += 3;
   return v;
+}
+
+function phaseBucket(g) { const t = Math.floor(g.turnNo / Math.max(1, g.teamOrder.length) * (g.mode === 'teams' ? W.teamPace : 1)); return t <= 3 ? 0 : t <= 7 ? 1 : 2; }
+
+// ценность покупки: выученная + синергия фракций + аванпост, когда здоровья мало
+function learnedValue(g, p, cid) {
+  const L = LEARNED[cid];
+  if (!L) return cardValue(g, p, cid) / 10;
+  const d = CARDS[cid];
+  let v = L[phaseBucket(g)];
+  if (d.faction !== 'none') {
+    const fac = ownFactions(p);
+    v += Math.min(5, fac[d.faction] || 0) * W.synergy;
+    const ranked = Object.entries(fac).sort((a, b) => b[1] - a[1]);
+    const total = ranked.reduce((x, y) => x + y[1], 0);
+    if (total >= 4 && ranked.length >= 2 && !ranked.slice(0, 2).some((x) => x[0] === d.faction)) v -= W.focus;
+  }
+  if (d.outpost && p.authority <= (g.settings.authority || 50) * 0.4) v += W.outpostDanger;
+  return v;
+}
+
+function bestPurchase(g, p, money) {
+  const minV = g.mode === 'teams' ? W.teamMinValue : W.minValue;
+  const row = g.row.map((c, i) => ({ c, i })).filter((x) => x.c);
+  const vals = row.map((x) => learnedValue(g, p, x.c.cid));
+  const expV = g.explorers > 0 ? learnedValue(g, p, 'explorer') : -99;
+  let best = { v: 0, first: null };
+  for (let mask = 1; mask < (1 << row.length); mask++) {
+    let cost = 0, v = 0, first = null, fv = -1e9;
+    for (let k = 0; k < row.length; k++) if (mask & (1 << k)) {
+      cost += CARDS[row[k].c.cid].cost; v += vals[k] - minV;
+      if (vals[k] > fv) { fv = vals[k]; first = row[k].i; }
+    }
+    if (cost > money) continue;
+    const exps = expV - minV > 0 ? Math.min(Math.floor((money - cost) / 2), g.explorers) : 0;
+    v += exps * (expV - minV);
+    if (v > best.v) best = { v, first };
+  }
+  if (best.first !== null) return { type: 'buy', slot: best.first };
+  if (money >= 2 && g.explorers > 0 && expV - minV > 0) return { type: 'buy', slot: 'explorer' };
+  return null;
 }
 
 function deckSize(p) { return p.deck.length + p.hand.length + p.discard.length + p.inPlay.length; }
@@ -138,15 +184,9 @@ function decide(g, botId, opts = {}) {
   const combat = g.pool.combat;
   const money = g.tradeOf(botId);
 
-  // 3. покупки на свои деньги
-  const buyable = g.row.map((c, i) => ({ c, i })).filter((x) => x.c && CARDS[x.c.cid].cost <= money);
-  if (buyable.length) {
-    const best = buyable.map((x) => ({ ...x, v: cardValue(g, p, x.c.cid) })).sort((a, b) => b.v - a.v)[0];
-    // если почти хватает на что-то сильное в ряду — не тратить на мелочь
-    const strongerSoon = g.row.some((c) => c && CARDS[c.cid].cost > money && CARDS[c.cid].cost <= money + 1 && CARDS[c.cid].cost >= 6);
-    if (!(strongerSoon && CARDS[best.c.cid].cost <= 2 && deckSize(p) > 14)) return { type: 'buy', slot: best.i };
-  }
-  if (money >= 2 && g.explorers > 0 && deckSize(p) < 16) return { type: 'buy', slot: 'explorer' };
+  // 3. покупки на свои деньги: лучший набор карт по выученной ценности
+  const buy = bestPurchase(g, p, money);
+  if (buy) return buy;
 
   if (opts.holdShared) return null; // общий урон пусть первым тратит живой напарник
 
@@ -170,9 +210,13 @@ function decide(g, botId, opts = {}) {
     const open = enemies.filter((t) => !g.teamHasOutpost(t.team)).sort((a, b) => a.authority - b.authority);
     if (open.length) {
       const t = open[0];
-      // ценную базу соперника снести, если на неё хватает и останется урон
-      const bases = t.bases.filter((b) => !def(b).outpost && def(b).defense <= combat && (def(b).defense <= combat - 3 || effVal(def(b).primary) >= 3));
-      if (bases.length) return { type: 'attackBase', target: t.id, uid: bases[0].uid };
+      // ценную базу соперника снести: ту, что каждый ход даёт урон/добор или усиливает флот
+      const recurring = (b) => effVal(def(b).primary) + (def(b).fleetHQ ? 5 : 0) + (def(b).allAlly ? 3 : 0);
+      const bases = g.players.filter((o) => o.team === t.team && o.alive).flatMap((o) => o.bases.map((b) => ({ o, b })))
+        .filter((x) => !def(x.b).outpost && def(x.b).defense <= combat && t.authority > combat
+          && (def(x.b).defense <= combat - 3 || recurring(x.b) * W.baseKill >= def(x.b).defense))
+        .sort((x, y) => recurring(y.b) - recurring(x.b));
+      if (bases.length) return { type: 'attackBase', target: bases[0].o.id, uid: bases[0].b.uid };
       return { type: 'attackPlayer', target: t.id, amount: combat };
     }
   }
@@ -186,4 +230,4 @@ function decide(g, botId, opts = {}) {
   return { type: 'endTurn' };
 }
 
-module.exports = { decide };
+module.exports = { decide, W };
