@@ -9,7 +9,7 @@ function setup(n = 2, hand = []) {
   const g = new Game(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'P' + i })), { authority: 50, randomOrder: false });
   const p = g.cur();
   p.discard.push(...p.hand); p.hand = hand.map(c);
-  g.pool = { trade: 0, combat: 0 };
+  g.pool = { trade: 0, combat: 0 }; g.purse = {};
   return { g, p, o: g.players[1] };
 }
 const t = (name, fn) => { try { fn(); console.log('✓', name); } catch (e) { console.log('✗', name, '\n ', e.message); process.exitCode = 1; } };
@@ -179,16 +179,23 @@ function teams() {
     { id: 'a2', name: 'A2', team: 'A' }, { id: 'b2', name: 'B2', team: 'B' },
   ], { authority: 75, randomOrder: false, mode: 'teams' });
   for (const p of g.players) { p.discard.push(...p.hand); p.hand = []; }
-  g.pool = { trade: 0, combat: 0 };
+  g.pool = { trade: 0, combat: 0 }; g.purse = {};
   return g;
 }
 
-t('2×2: ходят оба напарника, деньги и урон общие', () => {
+t('2×2: ходят оба напарника, урон общий, деньги у каждого свои', () => {
   const g = teams();
   assert.deepEqual(g.active().map((p) => p.id).sort(), ['a1', 'a2']);
-  g.pl('a1').hand = [c('scout')]; g.pl('a2').hand = [c('viper')];
+  g.pl('a1').hand = [c('scout'), c('scout')]; g.pl('a2').hand = [c('viper')];
   g.act('a1', { type: 'playAll' }); g.act('a2', { type: 'playAll' });
-  assert.deepEqual(g.pool, { trade: 1, combat: 1 });
+  assert.equal(g.pool.combat, 1);
+  assert.equal(g.tradeOf('a1'), 2);
+  assert.equal(g.tradeOf('a2'), 0);
+  assert.throws(() => g.act('a2', { type: 'buy', slot: 'explorer' }), /Не хватает денег/);
+  g.act('a1', { type: 'buy', slot: 'explorer' });
+  assert.ok(g.pl('a1').discard.some((x) => x.cid === 'explorer'));
+  assert.equal(g.view('a2').pool.trade, 0);
+  assert.equal(g.view('a2').purse.a1, 0);
   assert.throws(() => g.act('b1', { type: 'endTurn' }), /не ваш ход/);
 });
 
@@ -284,10 +291,10 @@ t('админ меняет здоровье, деньги и урон без з�
   const logLen = g.log.length;
   g.adminSet('p0', { hp: 99, trade: 7, combat: 12 });
   assert.equal(g.pl('p0').authority, 99);
-  assert.deepEqual(g.pool, { trade: 7, combat: 12 });
+  assert.equal(g.tradeOf('p0'), 7); assert.equal(g.pool.combat, 12);
   g.adminSet('p1', { hp: 5, trade: 100 });     // не его ход — деньги не меняются
   assert.equal(g.pl('p1').authority, 5);
-  assert.equal(g.pool.trade, 7);
+  assert.equal(g.tradeOf('p1'), 0);
   assert.equal(g.log.length, logLen);
 });
 
@@ -299,4 +306,15 @@ t('2×2: вышедший игрок не прикрывает команду с
   g.pool.combat = 5;
   g.act('a1', { type: 'attackPlayer', target: 'b2', amount: 5 });
   assert.equal(g.pl('b2').authority, 70);
+});
+
+t('лишний урон не сгорает о почти мёртвого соперника', () => {
+  const { g, o } = setup(3);
+  o.authority = 1;
+  g.pool.combat = 10;
+  g.act('p0', { type: 'attackPlayer', target: 'p1', amount: 10 });
+  assert.equal(o.alive, false);
+  assert.equal(g.pool.combat, 9);
+  g.act('p0', { type: 'attackPlayer', target: 'p2', amount: 9 });
+  assert.equal(g.pl('p2').authority, 41);
 });

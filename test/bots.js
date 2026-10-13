@@ -16,7 +16,7 @@ function randomMove(g, pid) {
     return { type: 'answer', uids: pr.cards.slice(0, pr.min).map((c) => c.uid) };
   }
   if (p.hand.length) return { type: 'playAll' };
-  const b = g.row.map((c, i) => (c && CARDS[c.cid].cost <= g.pool.trade ? i : -1)).filter((i) => i >= 0);
+  const b = g.row.map((c, i) => (c && CARDS[c.cid].cost <= g.tradeOf(pid) ? i : -1)).filter((i) => i >= 0);
   if (b.length && Math.random() < 0.7) return { type: 'buy', slot: pick(b) };
   if (g.pool.combat > 0) {
     const t = g.opponents(p).find((o) => !g.teamHasOutpost(o.team));

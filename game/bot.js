@@ -2,7 +2,7 @@
 /* Бот: по состоянию партии выбирает одно следующее действие.
  * decide(game, botId, { holdShared }) → действие для game.act(...) или null (сейчас делать нечего).
  * holdShared — в режиме 2 на 2 с живым напарником: пока напарник не нажал «Завершить ход»,
- * бот только разыгрывает свои карты и базы, а общие деньги и урон оставляет напарнику.
+ * бот разыгрывает свои карты и покупает на свои деньги, а общий урон оставляет напарнику.
  */
 const { CARDS } = require('../public/cards.js');
 
@@ -49,7 +49,7 @@ function answerPrompt(g, p) {
   if (pr.kind === 'choose') {
     // оцениваем варианты по ситуации
     const lowHp = p.authority <= 15;
-    const canBuy = g.row.some((c) => c && CARDS[c.cid].cost <= g.pool.trade + 3);
+    const canBuy = g.row.some((c) => c && CARDS[c.cid].cost <= g.tradeOf(p.id) + 3);
     let best = 0, bestV = -1;
     pr.options.forEach((o, i) => {
       let v = 0;
@@ -77,7 +77,7 @@ function answerPrompt(g, p) {
     case 'scrapRow': {
       // убрать из ряда самую ценную карту, которую мы сейчас не купим (чтобы не досталась соперникам)
       const c = cards.slice().sort((a, b) => CARDS[b.cid].cost - CARDS[a.cid].cost)[0];
-      if (c && CARDS[c.cid].cost >= 5 && CARDS[c.cid].cost > g.pool.trade) pick = [c.uid];
+      if (c && CARDS[c.cid].cost >= 5 && CARDS[c.cid].cost > g.tradeOf(p.id)) pick = [c.uid];
       break;
     }
     case 'scrapHD': case 'brain': {
@@ -134,30 +134,32 @@ function decide(g, botId, opts = {}) {
   const manual = p.bases.find((b) => def(b).primary.length && !(b.used && b.used.primary));
   if (manual) return { type: 'activate', uid: manual.uid };
 
-  if (opts.holdShared) return null; // деньги и урон пусть тратит живой напарник
-
   const enemies = g.opponents(p);
   const combat = g.pool.combat;
+  const money = g.tradeOf(botId);
 
-  // 3. можно ли добить кого-то прямо сейчас (с учётом утилизации кораблей ради урона)
+  // 3. покупки на свои деньги
+  const buyable = g.row.map((c, i) => ({ c, i })).filter((x) => x.c && CARDS[x.c.cid].cost <= money);
+  if (buyable.length) {
+    const best = buyable.map((x) => ({ ...x, v: cardValue(g, p, x.c.cid) })).sort((a, b) => b.v - a.v)[0];
+    // если почти хватает на что-то сильное в ряду — не тратить на мелочь
+    const strongerSoon = g.row.some((c) => c && CARDS[c.cid].cost > money && CARDS[c.cid].cost <= money + 1 && CARDS[c.cid].cost >= 6);
+    if (!(strongerSoon && CARDS[best.c.cid].cost <= 2 && deckSize(p) > 14)) return { type: 'buy', slot: best.i };
+  }
+  if (money >= 2 && g.explorers > 0 && deckSize(p) < 16) return { type: 'buy', slot: 'explorer' };
+
+  if (opts.holdShared) return null; // общий урон пусть первым тратит живой напарник
+
+  // 4. можно ли добить кого-то прямо сейчас (с учётом утилизации кораблей ради урона)
   const scrapCombat = [...p.inPlay, ...p.bases].filter((c) => def(c).scrap.some((e) => e.combat))
     .map((c) => ({ c, v: def(c).scrap.reduce((s, e) => s + (e.combat || 0), 0) }));
   const extra = scrapCombat.reduce((s, x) => s + x.v, 0);
   for (const t of enemies.slice().sort((a, b) => a.authority - b.authority)) {
     if (g.teamHasOutpost(t.team)) continue;
-    if (combat >= t.authority) return { type: 'attackPlayer', target: t.id, amount: combat };
+    if (combat >= t.authority) return { type: 'attackPlayer', target: t.id, amount: t.authority };
     if (combat + extra >= t.authority && scrapCombat.length) return { type: 'scrap', uid: scrapCombat[0].c.uid };
   }
 
-  // 4. покупки
-  const buyable = g.row.map((c, i) => ({ c, i })).filter((x) => x.c && CARDS[x.c.cid].cost <= g.pool.trade);
-  if (buyable.length) {
-    const best = buyable.map((x) => ({ ...x, v: cardValue(g, p, x.c.cid) })).sort((a, b) => b.v - a.v)[0];
-    // если почти хватает на что-то сильное в ряду — не тратить на мелочь
-    const strongerSoon = g.row.some((c) => c && CARDS[c.cid].cost > g.pool.trade && CARDS[c.cid].cost <= g.pool.trade + 1 && CARDS[c.cid].cost >= 6);
-    if (!(strongerSoon && CARDS[best.c.cid].cost <= 2 && deckSize(p) > 14)) return { type: 'buy', slot: best.i };
-  }
-  if (g.pool.trade >= 2 && g.explorers > 0 && deckSize(p) < 16) return { type: 'buy', slot: 'explorer' };
 
   // 5. атака: сначала аванпосты, потом самый слабый соперник; сильные базы — если урона с запасом
   if (combat > 0) {

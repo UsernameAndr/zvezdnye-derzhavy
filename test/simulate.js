@@ -30,9 +30,9 @@ function botStep(g) {
   if (manual.length && Math.random() < 0.8) return { type: 'activate', uid: pick(manual).uid };
   const scrappable = [...p.inPlay, ...p.bases].filter((c) => CARDS[c.copied || c.cid].scrap.length);
   if (scrappable.length && Math.random() < 0.15) return { type: 'scrap', uid: pick(scrappable).uid };
-  const buyable = g.row.map((c, i) => (c && CARDS[c.cid].cost <= g.pool.trade ? i : -1)).filter((i) => i >= 0);
+  const buyable = g.row.map((c, i) => (c && CARDS[c.cid].cost <= g.tradeOf(p.id) ? i : -1)).filter((i) => i >= 0);
   if (buyable.length && Math.random() < 0.9) return { type: 'buy', slot: pick(buyable) };
-  if (g.pool.trade >= 2 && g.explorers > 0 && Math.random() < 0.5) return { type: 'buy', slot: 'explorer' };
+  if (g.tradeOf(p.id) >= 2 && g.explorers > 0 && Math.random() < 0.5) return { type: 'buy', slot: 'explorer' };
   if (g.pool.combat > 0) {
     const ops = g.players.filter((o) => o.alive && o.team !== p.team);
     const t = pick(ops);

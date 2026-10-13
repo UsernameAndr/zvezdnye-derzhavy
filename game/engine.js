@@ -5,8 +5,9 @@
  *
  * Режимы:
  *  - ffa   — каждый сам за себя (команда = сам игрок);
- *  - teams — 2 на 2: у команды общее здоровье, напарники ходят одновременно,
- *            делят деньги и урон, союзные способности срабатывают и от карт напарника.
+ *  - teams — 2 на 2: у команды общее здоровье и общий урон, деньги у каждого свои
+ *            (каждый покупает в свою колоду), напарники ходят одновременно,
+ *            союзные способности срабатывают и от карт напарника, аванпост любого защищает всю команду.
  */
 const { CARDS } = require('../public/cards.js');
 
@@ -89,6 +90,8 @@ class Game {
     this.turnNo = 0;
     this.pool = { trade: 0, combat: 0 };
     this.topNext = 0;
+    this.purse = {};     // деньги каждого игрока в этот ход
+    this.topNextBy = {}; // «следующий корабль — на верх колоды» у каждого игрока
     this.queue = [];
     this.prompt = null;
     this.promptSrc = null;
@@ -132,6 +135,9 @@ class Game {
   teamHasOutpost(team) { return this.players.some((o) => o.team === team && o.alive && o.bases.some((b) => def(b).outpost)); }
   inPlayAll() { const r = []; for (const p of this.active()) r.push(...p.inPlay, ...p.bases); return r; }
   ownerOf(card) { return this.active().find((p) => p.inPlay.includes(card) || p.bases.includes(card)); }
+  tradeOf(pid) { return this.purse[pid] || 0; }
+  addTrade(pid, v) { this.purse[pid] = Math.max(0, (this.purse[pid] || 0) + v); this.syncPool(); }
+  syncPool() { this.pool.trade = Object.values(this.purse).reduce((a, b) => a + b, 0); }
   changeHp(p, d) { for (const m of this.teamMembers(p.team)) m.authority += d; }
   who(p) { return this.mode === 'teams' ? `команда ${this.teamNames(p.team)}` : p.name; }
 
@@ -203,7 +209,7 @@ class Game {
     const v = e[k];
     const srcName = src ? `«${def(src).name}»` : '';
     switch (k) {
-      case 'trade': this.pool.trade += v; break;
+      case 'trade': this.addTrade(p.id, v); break;
       case 'combat': this.pool.combat += v; break;
       case 'auth': this.changeHp(p, v); this.addLog(`${this.who(p)} восстанавливает ${v} здоровья (${p.authority})`, 'auth'); break;
       case 'draw': { const g = this.draw(p, v); if (g) this.addLog(`${p.name} берёт ${cardsWord(g)}`); break; }
@@ -234,6 +240,7 @@ class Game {
         break;
       case 'topNext':
         this.topNext += 1;
+        this.topNextBy[p.id] = (this.topNextBy[p.id] || 0) + 1;
         this.addLog(`Следующий купленный в этот ход корабль ляжет на верх колоды`);
         break;
       case 'freeShip': {
@@ -372,6 +379,8 @@ class Game {
     this.turnNo++;
     this.pool = { trade: 0, combat: 0 };
     this.topNext = 0;
+    this.purse = {};
+    this.topNextBy = {};
     this.ready = {};
     this.undoStack = [];
     this.addLog(this.mode === 'teams' ? `Ход команды: ${act.map((p) => p.name).join(' и ')}` : `Ход игрока ${act[0].name}`, 'turn');
@@ -479,7 +488,7 @@ class Game {
     const num = (x) => { const n = Math.floor(Number(x)); return Number.isFinite(n) ? Math.max(0, Math.min(9999, n)) : null; };
     if (v.hp !== undefined && num(v.hp) !== null && p.alive) for (const m of this.teamMembers(p.team)) m.authority = Math.max(1, num(v.hp));
     if (this.isActive(pid)) {
-      if (v.trade !== undefined && num(v.trade) !== null) this.pool.trade = num(v.trade);
+      if (v.trade !== undefined && num(v.trade) !== null) { this.purse[pid] = num(v.trade); this.syncPool(); }
       if (v.combat !== undefined && num(v.combat) !== null) this.pool.combat = num(v.combat);
     }
     this.undoStack = [];
@@ -525,7 +534,7 @@ class Game {
   snapshot(uid, pid) {
     return {
       uid, pid, revealSeq: this.revealSeq, logLen: this.log.length,
-      data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext })),
+      data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext, purse: this.purse, topNextBy: this.topNextBy })),
     };
   }
 
@@ -582,7 +591,7 @@ class Game {
     if (slot === 'explorer') {
       if (this.explorers <= 0) fail('Старатели закончились');
       d = CARDS.explorer;
-      if (this.pool.trade < d.cost) fail('Не хватает денег');
+      if (this.tradeOf(p.id) < d.cost) fail('Не хватает денег');
       this.explorers--;
       card = mk('explorer');
     } else {
@@ -590,11 +599,12 @@ class Game {
       card = this.row[i];
       if (!card) fail('Слот пуст');
       d = def(card);
-      if (this.pool.trade < d.cost) fail('Не хватает денег');
+      if (this.tradeOf(p.id) < d.cost) fail('Не хватает денег');
       this.refillRow(i);
     }
-    this.pool.trade -= d.cost;
-    if (d.type === 'ship' && this.topNext > 0) {
+    this.addTrade(p.id, -d.cost);
+    if (d.type === 'ship' && (this.topNextBy[p.id] || 0) > 0) {
+      this.topNextBy[p.id]--;
       this.topNext--;
       p.deck.push(clean(card));
       this.addLog(`${p.name} покупает «${d.name}» → на верх колоды`, 'buy');
@@ -653,6 +663,7 @@ class Game {
     amount = Math.floor(Number(amount));
     if (!(amount >= 1)) fail('Неверный урон');
     if (amount > this.pool.combat) fail('Не хватает урона');
+    amount = Math.min(amount, t.authority); // лишний урон не сгорает — остаётся на другие цели
     this.pool.combat -= amount;
     this.changeHp(t, -amount);
     this.addLog(`${p.name} атакует ${this.mode === 'teams' ? `команду ${this.teamNames(t.team)}` : t.name}: −${amount} (осталось ${Math.max(0, t.authority)})`, 'attack');
@@ -724,8 +735,9 @@ class Game {
       ready: Object.keys(this.ready).filter((k) => this.ready[k]),
       turnNo: this.turnNo,
       undoable: this.undoable(pid),
-      pool: this.pool,
-      topNext: this.topNext,
+      pool: { combat: this.pool.combat, trade: this.isActive(pid) ? this.tradeOf(pid) : 0 },
+      purse: Object.fromEntries(active.map((p) => [p.id, this.tradeOf(p.id)])),
+      topNext: this.topNextBy[pid] || 0,
       prompt,
       log: this.log.slice(-120),
       over: this.over,

@@ -395,7 +395,7 @@
       const deckLbl = { auto: 'Авто', 1: '80', 1.5: '120', 2: '160' };
       sEl.innerHTML = `
         <div class="set"><div class="set-l">Режим</div><div class="segs">${chips('mode', ['ffa', 'teams'], st.mode || 'ffa', (v) => (v === 'ffa' ? 'Каждый сам за себя' : '2 на 2'))}</div>
-          ${teamsMode ? '<p class="muted small set-note">Общее здоровье и общий ход у напарников: деньги и урон складываются, союзы срабатывают и от карт напарника.</p>' : ''}</div>
+          ${teamsMode ? '<p class="muted small set-note">У команды одно здоровье и общий урон, аванпост любого защищает обоих. Деньги у каждого свои — покупки идут в свою колоду. Напарники ходят одновременно, союзы срабатывают и от карт напарника.</p>' : ''}</div>
         <div class="set"><div class="set-l">${teamsMode ? 'Здоровье команды' : 'Стартовое здоровье'}</div>
           <div class="segs">${chips('authority', [20, 30, 40, 50, 75, 100], st.authority)}</div>
           ${host ? `<label class="custom">Своё значение <input id="l-auth" type="number" min="1" max="999" value="${st.authority}"></label>` : ''}
@@ -445,6 +445,9 @@
     const curName = teams ? actives.map((p) => esc(p.name)).join(' и ') : esc(cur.name);
     return { r, g, me, cur, actives, myTurn, blocked, ready, mate, teams, colorOf, hasOutpost, isEnemy, curName, host: r.hostId === S.pid };
   }
+
+  const teamOf = (C, p) => C.g.players.filter((x) => x.team === p.team);
+  const teamTitle = (C, p) => teamOf(C, p).map((x) => esc(x.name)).join(' и ');
 
   function canAttackBase(C, owner, b) {
     const d = CARDS[b.cid];
@@ -514,11 +517,14 @@
     opps = opps.filter((p) => C.isEnemy(p));
     const tip = coach(C);
     if (myTurn && !blocked && (g.undoable || []).length && !me.hand.length) tip.text += ' <span class="muted">Ошиблись с картой? Крестик на ней вернёт её в руку.</span>';
-    if (teams && myTurn && !blocked && !C.ready && tip.cue) tip.text += ' <span class="muted">Деньги и урон общие с напарником.</span>';
+    if (teams && myTurn && !blocked && !C.ready && tip.cue) tip.text += ' <span class="muted">Урон общий с напарником, деньги у каждого свои.</span>';
     const combat = g.pool.combat, trade = g.pool.trade;
 
     // соперники
-    const oppHTML = opps.map((p) => {
+    let enemyList = opps;
+    if (teams) { const seen = new Set(); enemyList = opps.filter((p) => !seen.has(p.team) && seen.add(p.team)); }
+    const oppHTML = enemyList.map((p) => {
+      if (teams) return teamCardHTML(C, p, mobile);
       const m = r.members.find((x) => x.id === p.id);
       const hit = S.prevAuth[p.id] !== undefined && p.authority < S.prevAuth[p.id];
       const canAtk = myTurn && !blocked && p.alive && combat > 0 && !C.hasOutpost(p);
@@ -560,16 +566,14 @@
         mateHTML = `<button class="opp-chip mate ${(g.active || []).includes(mate.id) ? 'turn' : ''} ${mate.alive ? '' : 'dead'}" style="--pc:${colorOf(mate.id)}" data-act="mate-sheet">
           <span class="avatar">${esc(initial(mate.name))}</span>
           <span class="oc-body"><span class="oc-name">${esc(mate.name)} · напарник</span>
-          <span class="oc-meta">${mate.alive ? `<span>✋${mate.handCount}</span><span>баз ${mate.bases.length}</span>${rdy ? '<span class="ok">готов</span>' : ''}${offline ? '<span>офлайн</span>' : ''}` : 'вышел'}</span></span></button>`;
+          <span class="oc-meta">${mate.alive ? `<span>✋${mate.handCount}</span>${(g.active || []).includes(mate.id) ? `<span>${I.trade}${(g.purse || {})[mate.id] || 0}</span>` : ''}${rdy ? '<span class="ok">готов</span>' : ''}${offline ? '<span>офлайн</span>' : ''}` : 'вышел'}</span></span></button>`;
       } else {
         const mhand = (mate.hand || []).map((c) => cardHTML(c, { size: 'mini', attrs: 'data-zone="matehand"' })).join('');
-        const mbases = mate.bases.map((b) => cardHTML(b, { size: 'mini', attrs: 'data-zone="matebase"' })).join('');
         mateHTML = `<div class="opp mate ${(g.active || []).includes(mate.id) ? 'turn' : ''} ${mate.alive ? '' : 'dead'}" style="--pc:${colorOf(mate.id)}">
           <div class="opp-head"><span class="avatar">${esc(initial(mate.name))}</span>
             <div class="opp-nm"><b>${esc(mate.name)}</b> <span class="tag-s">напарник</span>${rdy ? ' <span class="tag-s ok">готов</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div></div>
-          ${mate.alive ? `<div class="opp-meta"><span>колода ${mate.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${mate.id}">сброс ${mate.discard.length}</button></div>
-          <div class="zl">Рука</div><div class="opp-bases">${mhand || '<span class="none">пусто</span>'}</div>
-          <div class="zl">Базы</div><div class="opp-bases">${mbases || '<span class="none">нет баз</span>'}</div>` : '<div class="muted">вышел из игры</div>'}
+          ${mate.alive ? `<div class="opp-meta">${(g.active || []).includes(mate.id) ? `<span>${I.trade}деньги ${(g.purse || {})[mate.id] || 0}</span>` : ''}<span>колода ${mate.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${mate.id}">сброс ${mate.discard.length}</button></div>
+          <div class="zl">Рука</div><div class="opp-bases">${mhand || '<span class="none">пусто</span>'}</div>` : '<div class="muted">вышел из игры</div>'}
         </div>`;
       }
     }
@@ -606,19 +610,19 @@
           if (d.primary.length && !used.primary) acts += `<button class="mini-btn use" data-act="activate" data-uid="${b.uid}">Использовать</button>`;
           if (d.scrap.length) acts += `<button class="mini-btn" data-act="scrap" data-uid="${b.uid}">Утилизировать</button>`;
         }
-        return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"', undo: myTurn && (g.undoable || []).includes(b.uid) });
-      }).join('');
+        return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"', undo: myTurn && (g.undoable || []).includes(b.uid), badge: teams ? '<span class="owner-tag">ваша</span>' : '' });
+      }).join('') + (teams && mate && mate.alive ? mate.bases.map((b) => cardHTML(b, { size: ps, attrs: 'data-zone="matebase"', badge: `<span class="owner-tag">${esc(mate.name)}</span>` })).join('') : '');
       const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
       const top = me.discard[me.discard.length - 1];
-      basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''}"><div class="zl">Ваши базы</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
+      basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''}"><div class="zl">${teams ? `Базы команды${g.players.some((x) => x.team === me.team && x.alive && x.bases.some((b) => CARDS[b.cid].outpost)) ? ' · 🛡 аванпост защищает вас обоих' : ''}` : 'Ваши базы'}</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
       mineHTML = `
         <div class="hint ${myTurn ? 'mine' : ''}">${tip.text}</div>
         <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
         <section class="actionbar ${myTurn ? 'my-turn' : ''}" style="--pc:${colorOf(me.id)}">
           <div class="stats">
             <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="${teams ? 'Здоровье команды' : 'Ваше здоровье'}">${I.auth}<b>${Math.max(0, me.authority)}</b><small>${teams ? 'команда' : 'здоровье'}</small></div>
-            <div class="stat" title="Деньги на этот ход">${I.trade}<b>${myTurn ? trade : 0}</b><small>деньги</small></div>
-            <div class="stat" title="Урон на этот ход">${I.combat}<b>${myTurn ? combat : 0}</b><small>урон</small></div>
+            <div class="stat" title="${teams ? 'Ваши деньги — покупки идут в вашу колоду' : 'Деньги на этот ход'}">${I.trade}<b>${myTurn ? trade : 0}</b><small>${teams ? 'ваши деньги' : 'деньги'}</small></div>
+            <div class="stat" title="${teams ? 'Урон общий с напарником' : 'Урон на этот ход'}">${I.combat}<b>${myTurn ? combat : 0}</b><small>${teams ? 'урон команды' : 'урон'}</small></div>
             <button class="stat pile" data-act="view-deck" title="Колода">${I.draw}<b>${me.deckCount}</b><small>колода</small></button>
             <button class="stat pile" data-act="view-discard" data-pid="${me.id}" title="Сброс">${top ? '▤' : '▢'}<b>${me.discard.length}</b><small>сброс</small></button>
           </div>
@@ -680,6 +684,46 @@
     if (S.modal === 'opp' && S.oppSheet) oppSheet(S.oppSheet, true);
     if (S.modal === 'mate') mateSheet(true);
     if (S.modal === 'admin') adminPanel(true);
+  }
+
+  // Команда соперников одной плашкой: общее здоровье, все базы обоих, одна кнопка атаки
+  function teamCardHTML(C, p, mobile) {
+    const { g, r, myTurn, blocked, colorOf } = C;
+    const members = teamOf(C, p);
+    const alive = members.filter((m) => m.alive);
+    const target = alive[0] || p;
+    const hp = Math.max(0, p.authority);
+    const hit = S.prevAuth[p.id] !== undefined && p.authority < S.prevAuth[p.id];
+    const isTurn = members.some((m) => (g.active || []).includes(m.id));
+    const combat = g.pool.combat;
+    const canAtk = myTurn && !blocked && alive.length && combat > 0 && !C.hasOutpost(p);
+    const bases = [];
+    for (const m of alive) for (const b of m.bases) bases.push({ m, b });
+    const anyBaseTarget = bases.some(({ m, b }) => canAttackBase(C, m, b));
+    const memberLine = (m) => {
+      const mm = r.members.find((x) => x.id === m.id);
+      return `<span class="tm-mem ${m.alive ? '' : 'out'}"><span class="avatar xs" style="--pc:${colorOf(m.id)}">${esc(initial(m.name))}</span>${esc(m.name)}${mm && mm.bot ? ' <span class="tag-s bot">бот</span>' : ''}${mm && !mm.connected ? ' <span class="tag-s muted">офлайн</span>' : ''}
+        ${m.alive ? `<span class="muted small">рука ${m.handCount} · <button class="lnk" data-act="view-discard" data-pid="${m.id}">сброс ${m.discard.length}</button></span>${m.pendingDiscard ? ` <span class="tag-s warn">сбросит ${m.pendingDiscard}</span>` : ''}` : '<span class="muted small">вышел</span>'}</span>`;
+    };
+    if (mobile) {
+      return `<button class="opp-chip team ${isTurn ? 'turn' : ''} ${alive.length ? '' : 'dead'} ${hit ? 'hit' : ''} ${canAtk || anyBaseTarget ? 'target' : ''}" style="--pc:${colorOf(p.id)}" data-act="opp-sheet" data-pid="${target.id}">
+        <span class="oc-body"><span class="oc-name">Команда: ${teamTitle(C, p)}</span>
+        <span class="oc-meta">${alive.length ? `<span class="hp ${hp <= 10 ? 'low' : ''}">${I.auth}${hp}</span><span>баз ${bases.length}${C.hasOutpost(p) ? ' 🛡' : ''}</span>` : 'выбыла'}</span></span>
+        ${canAtk || anyBaseTarget ? '<span class="oc-atk">⚔</span>' : ''}</button>`;
+    }
+    const bHTML = bases.map(({ m, b }) => {
+      const can = canAttackBase(C, m, b);
+      return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${m.id}" ${can ? `data-act="atkbase" data-target="${m.id}"` : ''}`, badge: `<span class="owner-tag">${esc(m.name)}</span>` });
+    }).join('');
+    return `<div class="opp team-card ${isTurn ? 'turn' : ''} ${alive.length ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
+      <div class="opp-head"><div class="opp-nm"><b>Команда соперников</b></div>
+        <div class="hp-badge ${hp <= 10 ? 'low' : ''}" title="Здоровье команды">${hp}</div></div>
+      <div class="tm-list">${members.map(memberLine).join('')}</div>
+      ${alive.length ? `<div class="zl">Базы команды${C.hasOutpost(p) ? ' · <span class="tag-s">🛡 аванпост защищает команду</span>' : ''}</div>
+        <div class="opp-bases">${bHTML || '<span class="none">нет баз</span>'}</div>
+        ${canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${target.id}">Атаковать команду</button>` : C.hasOutpost(p) && myTurn && combat > 0 ? '<div class="muted small">Сначала уничтожьте аванпост</div>' : ''}`
+      : `<div class="muted">команда выбыла${p.place ? ` · ${p.place} место` : ''}</div>`}
+    </div>`;
   }
 
   function flashTurn() {
@@ -769,16 +813,19 @@
     const p = C.g.players.find((x) => x.id === pid);
     if (!p) return;
     S.oppSheet = pid;
-    const canAtk = C.myTurn && !C.blocked && p.alive && C.g.pool.combat > 0 && !C.hasOutpost(p);
-    const bases = p.bases.map((b) => {
-      const can = canAttackBase(C, p, b);
-      return `<div class="ob">${cardHTML(b, { size: 'sm', attrs: `data-zone="oppbase" data-owner="${p.id}"` })}${can ? `<button class="btn danger sm" data-act="atkbase" data-target="${p.id}" data-uid="${b.uid}">Уничтожить (${CARDS[b.cid].defense})</button>` : ''}</div>`;
-    }).join('');
-    const html = `<h3>${esc(p.name)}</h3>
-      <div class="os-stats"><span>${I.auth} здоровье <b>${Math.max(0, p.authority)}</b></span><span>в руке ${p.handCount}</span><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button></div>
+    const members = C.teams ? teamOf(C, p).filter((m) => m.alive) : [p];
+    const target = members[0] || p;
+    const canAtk = C.myTurn && !C.blocked && target.alive && C.g.pool.combat > 0 && !C.hasOutpost(p);
+    const bases = members.flatMap((m) => m.bases.map((b) => {
+      const can = canAttackBase(C, m, b);
+      return `<div class="ob">${cardHTML(b, { size: 'sm', attrs: `data-zone="oppbase" data-owner="${m.id}"`, badge: C.teams ? `<span class="owner-tag">${esc(m.name)}</span>` : '' })}${can ? `<button class="btn danger sm" data-act="atkbase" data-target="${m.id}" data-uid="${b.uid}">Уничтожить (${CARDS[b.cid].defense})</button>` : ''}</div>`;
+    })).join('');
+    const stats = members.map((m) => `<span>${C.teams ? `<b>${esc(m.name)}</b>: ` : ''}в руке ${m.handCount} · в колоде ${m.deckCount} · <button class="lnk" data-act="view-discard" data-pid="${m.id}">сброс ${m.discard.length}</button></span>`).join('');
+    const html = `<h3>${C.teams ? 'Команда: ' + teamTitle(C, p) : esc(p.name)}</h3>
+      <div class="os-stats"><span>${I.auth} здоровье${C.teams ? ' команды' : ''} <b>${Math.max(0, p.authority)}</b></span>${stats}</div>
       ${C.hasOutpost(p) ? `<p class="muted">Защищён аванпостом${C.teams ? ' команды' : ''}: сначала уничтожьте аванпост, потом можно атаковать ${C.teams ? 'команду' : 'игрока'} и другие базы.</p>` : ''}
       <div class="sec-title">Базы</div><div class="ob-grid">${bases || '<span class="none">Нет баз</span>'}</div>
-      ${canAtk ? `<div class="m-actions"><button class="btn danger big" data-act="atkplayer" data-target="${p.id}">Атаковать (${C.g.pool.combat} урона)</button></div>` : ''}`;
+      ${canAtk ? `<div class="m-actions"><button class="btn danger big" data-act="atkplayer" data-target="${target.id}">Атаковать${C.teams ? ' команду' : ''} (${Math.min(C.g.pool.combat, target.authority)} урона)</button></div>` : ''}`;
     if (refresh && $('.modal.opp-modal')) { $('.modal.opp-modal').innerHTML = '<button class="x" data-act="close-modal">×</button>' + html; return; }
     openModal(html, { kind: 'opp', cls: 'opp-modal', sheet: true });
   }
@@ -854,8 +901,10 @@
   function attackModal(target) {
     const g = S.room.game;
     const p = g.players.find((x) => x.id === target);
-    const max = g.pool.combat;
-    openModal(`<h3>Атаковать: ${esc(p.name)}</h3><p class="muted">Здоровье соперника — ${p.authority}. У вас ${max} урона${g.players.filter((x) => x.alive).length > 2 ? '; урон можно разделить между соперниками' : ''}.</p>
+    const max = Math.min(g.pool.combat, Math.max(1, p.authority));
+    const teamName = g.mode === 'teams' ? 'команду ' + g.players.filter((x) => x.team === p.team).map((x) => esc(x.name)).join(' и ') : esc(p.name);
+    const left = g.pool.combat - max;
+    openModal(`<h3>Атаковать ${teamName}</h3><p class="muted">Здоровье ${g.mode === 'teams' ? 'команды' : 'соперника'} — ${p.authority}. У вас ${g.pool.combat} урона${left > 0 ? `; чтобы добить, хватит ${max}, остальное (${left}) останется у вас` : ''}.</p>
       <div class="stepper"><button class="btn" id="a-minus">−</button><input id="a-val" type="number" min="1" max="${max}" value="${max}"><button class="btn" id="a-plus">+</button></div>
       <div class="m-actions"><button class="btn" data-act="close-modal">Отмена</button><button class="btn danger" id="a-go">Нанести урон</button></div>`, { kind: 'attack' });
     const inp = $('#a-val');
