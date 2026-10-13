@@ -9,7 +9,12 @@ const { CARDS } = require('../public/cards.js');
 // Это прирост шанса победы от покупки карты по сравнению с отказом от покупки в той же ситуации.
 let LEARNED = {};
 try { LEARNED = require('./card-values.json'); } catch { LEARNED = {}; }
-const W = { synergy: 0, focus: 0, outpostDanger: 0.6, minValue: 0.4, teamMinValue: 0.25, teamPace: 1.4, baseKill: 1 };
+// То же для долгих партий (много здоровья, test/learn-long.js): карта → [ближе к концу, середина, далеко до конца].
+// Берём из неё только поправку относительно средней карты: сколько покупать, решает основная таблица.
+let LEARNED_LONG = {};
+try { LEARNED_LONG = require('./card-values-long.json'); } catch { LEARNED_LONG = {}; }
+const LONG_MEAN = [0, 1, 2].map((b) => { const v = Object.values(LEARNED_LONG).map((x) => x[b]); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : 0; });
+const W = { synergy: 0, focus: 0, outpostDanger: 0.6, minValue: 0.4, teamMinValue: 0.25, teamPace: 1.4, baseKill: 1, longExp: 1, longW: 0.7 };
 
 const def = (c) => CARDS[c.copied || c.cid];
 const val = (e) => {
@@ -54,6 +59,8 @@ function learnedValue(g, p, cid) {
   if (!L) return cardValue(g, p, cid) / 10;
   const d = CARDS[cid];
   let v = L[phaseBucket(g)];
+  const LL = LEARNED_LONG[cid], lg = longness(g, p);
+  if (LL && W.longW && lg >= 0.34) { const b = lg < 0.67 ? 1 : 2; v += W.longW * horizon(g, p) * (LL[b] - LONG_MEAN[b]); }
   if (d.faction !== 'none') {
     const fac = ownFactions(p);
     v += Math.min(5, fac[d.faction] || 0) * W.synergy;
@@ -65,11 +72,24 @@ function learnedValue(g, p, cid) {
   return v;
 }
 
+// насколько партия ещё далека от конца: 0 — развязка близко, 1 — впереди долгая игра (много здоровья)
+function longness(g, p) {
+  const enemyHp = Math.min(...g.opponents(p).map((o) => o.authority));
+  return Math.max(0, Math.min(1, (Math.min(enemyHp, p.authority) - 50) / 100));
+}
+// поправки для очень долгих партий: полностью при стартовом здоровье от 350, не действуют при 150 и меньше;
+// к концу партии (здоровья осталось мало) сходят на нет
+function horizon(g, p) {
+  const start = Math.max(0, Math.min(1, ((g.settings.authority || 50) - 150) / 200));
+  return start * longness(g, p);
+}
+
 function bestPurchase(g, p, money) {
   const minV = g.mode === 'teams' ? W.teamMinValue : W.minValue;
   const row = g.row.map((c, i) => ({ c, i })).filter((x) => x.c);
   const vals = row.map((x) => learnedValue(g, p, x.c.cid));
-  const expV = g.explorers > 0 ? learnedValue(g, p, 'explorer') : -99;
+  // в долгой партии Старатели только разбавляют колоду
+  const expV = g.explorers > 0 ? learnedValue(g, p, 'explorer') - W.longExp * horizon(g, p) : -99;
   let best = { v: 0, first: null };
   for (let mask = 1; mask < (1 << row.length); mask++) {
     let cost = 0, v = 0, first = null, fv = -1e9;
@@ -231,4 +251,4 @@ function decide(g, botId, opts = {}) {
   return { type: 'endTurn' };
 }
 
-module.exports = { decide, W };
+module.exports = { decide, W, longness };
