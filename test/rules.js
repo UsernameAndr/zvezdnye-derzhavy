@@ -318,3 +318,19 @@ t('лишний урон не сгорает о почти мёртвого со
   g.act('p0', { type: 'attackPlayer', target: 'p2', amount: 9 });
   assert.equal(g.pl('p2').authority, 41);
 });
+
+t('2×2: базой пользуется только владелец, защищает она всю команду', () => {
+  const g = teams();
+  g.pl('a1').bases.push(c('t_barter'));          // база с выбором, a1 — владелец
+  const uid = g.pl('a1').bases[0].uid;
+  assert.throws(() => g.act('a2', { type: 'activate', uid }), /Базы нет/);
+  assert.throws(() => g.act('a2', { type: 'scrap', uid }), /не в игре/);
+  g.act('a1', { type: 'activate', uid });
+  g.act('a1', { type: 'answer', option: 1 });      // +2 денег — владельцу
+  assert.equal(g.tradeOf('a1'), 2);
+  assert.equal(g.tradeOf('a2'), 0);
+  g.pl('a1').bases.push(c('t_post'));              // аванпост a1 защищает и a2
+  g.finishTurn();
+  g.pool.combat = 10;
+  assert.throws(() => g.act('b1', { type: 'attackPlayer', target: 'a2', amount: 5 }), /аванпост/);
+});
