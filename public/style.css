@@ -364,14 +364,25 @@ button.stat:hover { border-color: #4a5870; }
 
   .zone { padding: 4px 6px 5px; border-radius: 6px; }
   .zl { font-size: 10px; margin-bottom: 3px; }
-  .board { --mw: clamp(50px, calc((100dvh - 330px) / 5.3), 88px); --hw: clamp(60px, calc((100dvh - 330px) / 4.2), 112px); overflow-y: auto; }
+  /* размеры карт от ширины экрана: в ряду видно 6 карт, в руке — 5 */
+  .board { --mw: clamp(46px, calc((100vw - 54px) / 6), 74px); --hw: clamp(54px, calc((100vw - 50px) / 5), 92px); --rw: var(--mw); overflow-y: auto; }
   .card.mini { --w: var(--mw); }
   .hand .card.mini { --w: var(--hw); }
+  .market .card.mini { --w: var(--rw); }
   .strip { gap: 4px; min-height: calc(var(--mw) * 1.4); scrollbar-width: none; }
   .strip::-webkit-scrollbar { display: none; }
-  .market .strip { min-height: calc(var(--mw) * 1.4); }
+  .market .strip { min-height: calc(var(--rw) * 1.4); }
   .hand { min-height: calc(var(--hw) * 1.4); gap: 5px; }
-  .table-row { grid-template-columns: 1fr 1fr; gap: 5px; }
+  .table-row { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .bases-zone.empty { display: none; }
+  /* сыгранные карты переносятся на вторую строку, а не уезжают за край */
+  .play-zone .strip { flex-wrap: wrap; overflow-y: auto; max-height: calc(var(--mw) * 2.8 + 6px); }
+  .top-row .market { flex: 1 1 100%; }
+  /* свободное место — над подсказкой, рука и кнопки прижаты к низу */
+  .board > .hint { margin-top: auto; }
+  .hand-zone.empty .hand { min-height: 34px; align-items: center; }
+  /* чья карта — маленькой подписью сверху, чтобы не закрывать цифры */
+  .card.mini .owner-tag { top: 0; bottom: auto; font-size: 7.5px; padding: 0 2px; background: rgba(5, 7, 12, .75); }
   .mini-btn { font-size: 9px; padding: 3px 1px; }
   .c-undo { width: 22px; height: 22px; font-size: 16px; }
   .hint { font-size: 12.5px; padding: 5px 8px; line-height: 1.3; }
@@ -381,11 +392,12 @@ button.stat:hover { border-color: #4a5870; }
   .actionbar .acts { width: 100%; margin: 0; }
   .actionbar .acts .btn { flex: 1; padding: 10px 8px; font-size: 14px; }
   .actionbar .wait { width: 100%; text-align: center; padding: 4px; }
-  .stats { gap: 4px; flex-wrap: nowrap; }
-  .stat { min-width: 0; padding: 2px 6px; }
-  .stat b { font-size: 15px; }
-  .stat small { font-size: 8.5px; }
-  .stat.pile { display: none; }
+  .stats { gap: 3px; flex-wrap: nowrap; }
+  .stat { min-width: 0; padding: 1px 4px; column-gap: 3px; justify-content: center; }
+  .stat .i, .stat > :first-child { font-size: 12px; }
+  .stat b { font-size: 14px; }
+  .stat small { font-size: 7.5px; letter-spacing: .02em; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat.pile { display: grid; }
   .acts { gap: 5px; }
 
   .overlay.sheet { align-items: flex-end; padding: 0; }
@@ -399,6 +411,11 @@ button.stat:hover { border-color: #4a5870; }
   .pick-grid { --cw: 104px; gap: 8px; }
   .ob-grid { --cw: 104px; }
   .choice { min-width: 120px; padding: 12px 14px; font-size: 14px; }
+}
+/* высокий телефон: торговый ряд крупнее, в две строки — видно все карты сразу */
+@media (max-width: 760px) and (min-height: 740px) {
+  .board { --rw: clamp(60px, calc((100vw - 48px) / 4), 92px); }
+  .market .strip { flex-wrap: wrap; }
 }
 
 

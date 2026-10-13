@@ -617,15 +617,15 @@
       }).join('') + (teams && mate && mate.alive ? mate.bases.map((b) => cardHTML(b, { size: ps, attrs: 'data-zone="matebase"', badge: `<span class="owner-tag">${esc(mate.name)}</span>` })).join('') : '');
       const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
       const top = me.discard[me.discard.length - 1];
-      basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''}"><div class="zl">${teams ? `Базы команды${g.players.some((x) => x.team === me.team && x.alive && x.bases.some((b) => CARDS[b.cid].outpost)) ? ' · 🛡 аванпост защищает вас обоих' : ''}` : 'Ваши базы'}</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
+      basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''} ${bases ? '' : 'empty'}"><div class="zl">${teams ? `Базы команды${g.players.some((x) => x.team === me.team && x.alive && x.bases.some((b) => CARDS[b.cid].outpost)) ? ' · 🛡 аванпост защищает вас обоих' : ''}` : 'Ваши базы'}</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
       mineHTML = `
         <div class="hint ${myTurn ? 'mine' : ''}">${tip.text}</div>
-        <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
+        <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''} ${hand ? '' : 'empty'}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
         <section class="actionbar ${myTurn ? 'my-turn' : ''}" style="--pc:${colorOf(me.id)}">
           <div class="stats">
-            <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="${teams ? 'Здоровье команды' : 'Ваше здоровье'}">${I.auth}<b>${Math.max(0, me.authority)}</b><small>${teams ? 'команда' : 'здоровье'}</small></div>
-            <div class="stat" title="${teams ? 'Ваши деньги — покупки идут в вашу колоду' : 'Деньги на этот ход'}">${I.trade}<b>${myTurn ? trade : 0}</b><small>${teams ? 'ваши деньги' : 'деньги'}</small></div>
-            <div class="stat" title="${teams ? 'Урон общий с напарником' : 'Урон на этот ход'}">${I.combat}<b>${myTurn ? combat : 0}</b><small>${teams ? 'урон команды' : 'урон'}</small></div>
+            <div class="stat hp ${me.authority <= 10 ? 'low' : ''} ${S.prevAuth[me.id] !== undefined && me.authority < S.prevAuth[me.id] ? 'hit' : ''}" title="${teams ? 'Здоровье команды' : 'Ваше здоровье'}">${I.auth}<b>${Math.max(0, me.authority)}</b><small>${teams && !mobile ? 'команда' : 'здоровье'}</small></div>
+            <div class="stat" title="${teams ? 'Ваши деньги — покупки идут в вашу колоду' : 'Деньги на этот ход'}">${I.trade}<b>${myTurn ? trade : 0}</b><small>${teams && !mobile ? 'ваши деньги' : 'деньги'}</small></div>
+            <div class="stat" title="${teams ? 'Урон общий с напарником' : 'Урон на этот ход'}">${I.combat}<b>${myTurn ? combat : 0}</b><small>${teams && !mobile ? 'урон команды' : 'урон'}</small></div>
             <button class="stat pile" data-act="view-deck" title="Колода">${I.draw}<b>${me.deckCount}</b><small>колода</small></button>
             <button class="stat pile" data-act="view-discard" data-pid="${me.id}" title="Сброс">${top ? '▤' : '▢'}<b>${me.discard.length}</b><small>сброс</small></button>
           </div>
@@ -641,7 +641,7 @@
       mineHTML = '<div class="hint">Вы наблюдаете за партией.</div>';
     }
 
-    const turnLbl = g.over ? 'Партия окончена' : myTurn ? (teams && mate && mate.alive ? `Ваш ход · напарник: ${esc(mate.name)}` : 'Ваш ход') : `Ходит ${C.curName}`;
+    const turnLbl = g.over ? 'Партия окончена' : myTurn ? (teams && mate && mate.alive && !mobile ? `Ваш ход · напарник: ${esc(mate.name)}` : 'Ваш ход') : mobile && teams ? `Ходят ${esc(C.actives.map((x) => x.name).join(', '))}` : `Ходит ${C.curName}`;
     $('#board').innerHTML = `
       <header class="topbar">
         <div class="brand">Звёздные Державы <span>стол ${r.code}</span></div>
