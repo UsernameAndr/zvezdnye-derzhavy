@@ -200,6 +200,9 @@ function decide(g, botId, opts = {}) {
   // 2. базы с ручной способностью
   const manual = p.bases.find((b) => def(b).primary.length && !(b.used && b.used.primary));
   if (manual) return { type: 'activate', uid: manual.uid };
+  // 2б. герой: ход-другой он помогает союзами, потом бот отправляет его в бой ради эффекта
+  const hero = (p.heroes || []).find((h) => h.boughtTurn < g.turnNo);
+  if (hero) return { type: 'scrap', uid: hero.uid };
 
   const enemies = g.opponents(p);
   const combat = g.pool.combat;

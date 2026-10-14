@@ -46,9 +46,9 @@ function deckMult(setting, nPlayers) {
   return [1, 1.5, 2].includes(m) ? m : 1;
 }
 // Состав торговой колоды: целые копии набора + для «полуторной» — по половине карт каждой фракции
-function buildTradeDeck(mult) {
+function buildTradeDeck(mult, heroes) {
   const set = [];
-  for (const c of Object.values(CARDS)) for (let i = 0; i < c.count; i++) set.push(c.id);
+  for (const c of Object.values(CARDS)) if (c.type !== 'hero') for (let i = 0; i < c.count; i++) set.push(c.id);
   const out = [];
   for (let k = 0; k < Math.floor(mult); k++) out.push(...set);
   if (mult % 1) {
@@ -56,9 +56,11 @@ function buildTradeDeck(mult) {
     for (const id of set) (byF[CARDS[id].faction] = byF[CARDS[id].faction] || []).push(id);
     for (const ids of Object.values(byF)) out.push(...shuffle(ids.slice()).slice(0, Math.round(ids.length * (mult % 1))));
   }
+  // герои — по одному каждого (дополнение)
+  if (heroes) for (const c of Object.values(CARDS)) if (c.type === 'hero') out.push(c.id);
   return out;
 }
-function tradeDeckSize(mult) { return buildTradeDeck(mult).length; }
+function tradeDeckSize(mult, heroes) { return buildTradeDeck(mult, heroes).length; }
 
 class Game {
   constructor(players, settings) {
@@ -68,7 +70,7 @@ class Game {
     this.players = order.map((p) => ({
       id: p.id, name: p.name, authority: this.settings.authority,
       team: this.mode === 'teams' ? (p.team === 'B' ? 'B' : 'A') : p.id,
-      deck: [], hand: [], discard: [], inPlay: [], bases: [],
+      deck: [], hand: [], discard: [], inPlay: [], bases: [], heroes: [],
       pendingDiscard: 0, alive: true, place: null,
     }));
     // порядок ходов — по командам (в ffa команда = игрок)
@@ -78,7 +80,7 @@ class Game {
     const mult = deckMult(this.settings.deckSize, this.players.length);
     this.deckMult = mult;
     this.tradeDeck = [];
-    for (const id of buildTradeDeck(mult)) this.tradeDeck.push(mk(id));
+    for (const id of buildTradeDeck(mult, !!this.settings.heroes)) this.tradeDeck.push(mk(id));
     shuffle(this.tradeDeck);
     this.row = [];
     for (let i = 0; i < 5; i++) this.row.push(this.tradeDeck.pop() || null);
@@ -145,8 +147,9 @@ class Game {
   teamAlive(team) { return this.players.some((p) => p.team === team && p.alive); }
   opponents(p = this.cur()) { return this.players.filter((o) => o.alive && o.team !== p.team); }
   teamHasOutpost(team) { return this.players.some((o) => o.team === team && o.alive && o.bases.some((b) => def(b).outpost)); }
-  inPlayAll() { const r = []; for (const p of this.active()) r.push(...p.inPlay, ...p.bases); return r; }
-  ownerOf(card) { return this.active().find((p) => p.inPlay.includes(card) || p.bases.includes(card)); }
+  // всё, что сейчас «в игре» у ходящих: сыгранные корабли, базы и герои (герои — союзники своей фракции)
+  inPlayAll() { const r = []; for (const p of this.active()) r.push(...p.inPlay, ...p.bases, ...p.heroes); return r; }
+  ownerOf(card) { return this.active().find((p) => p.inPlay.includes(card) || p.bases.includes(card) || p.heroes.includes(card)); }
   tradeOf(pid) { return this.purse[pid] || 0; }
   addTrade(pid, v) { this.purse[pid] = Math.max(0, (this.purse[pid] || 0) + v); this.syncPool(); }
   syncPool() { this.pool.trade = Object.values(this.purse).reduce((a, b) => a + b, 0); }
@@ -665,8 +668,12 @@ class Game {
       this.refillRow(i);
     }
     this.addTrade(p.id, -d.cost);
-    (this.turnStats.buys[p.id] = this.turnStats.buys[p.id] || []).push(d.id || (slot === 'explorer' ? 'explorer' : card.cid));
-    if (d.type === 'ship' && (this.topNextBy[p.id] || 0) > 0) {
+    (this.turnStats.buys[p.id] = this.turnStats.buys[p.id] || []).push(d.id);
+    if (d.type === 'hero') {
+      // герой не идёт в колоду: встаёт рядом с игроком и сразу считается союзником своей фракции
+      p.heroes.push({ ...clean(card), boughtTurn: this.turnNo });
+      this.addLog(`${p.name} нанимает героя «${d.name}»`, 'buy');
+    } else if (d.type === 'ship' && (this.topNextBy[p.id] || 0) > 0) {
       this.topNextBy[p.id]--;
       this.topNext--;
       p.deck.push(clean(card));
@@ -681,13 +688,14 @@ class Game {
   scrapAbility(p, uid) {
     let zone = p.inPlay, i = p.inPlay.findIndex((c) => c.uid === uid);
     if (i < 0) { zone = p.bases; i = p.bases.findIndex((c) => c.uid === uid); }
+    if (i < 0) { zone = p.heroes; i = p.heroes.findIndex((c) => c.uid === uid); }
     if (i < 0) fail('Карта не в игре');
     const c = zone[i];
     const d = def(c);
     if (!d.scrap.length) fail('У карты нет способности утилизации');
     zone.splice(i, 1);
     if (c.cid === 'explorer') this.explorers++;
-    this.addLog(`${p.name} утилизирует «${d.name}»`, 'scrap');
+    this.addLog(d.type === 'hero' ? `${p.name} отправляет в бой героя «${d.name}» — герой уходит из игры` : `${p.name} утилизирует «${d.name}»`, 'scrap');
     this.enqueueFront(d.scrap, c, p.id);
     this.process();
   }
@@ -789,7 +797,7 @@ class Game {
       players: this.players.map((p) => ({
         id: p.id, name: p.name, team: p.team, authority: p.authority, alive: p.alive, place: p.place,
         handCount: p.hand.length, deckCount: p.deck.length,
-        discard: p.discard.map(pub), bases: p.bases.map(pub), inPlay: p.inPlay.map(pub),
+        discard: p.discard.map(pub), bases: p.bases.map(pub), inPlay: p.inPlay.map(pub), heroes: p.heroes.map(pub),
         pendingDiscard: p.pendingDiscard,
         hand: seesHand(p) ? p.hand.map(pub) : null,
         // своя колода — без порядка (отсортирована), чтобы не было спойлера
@@ -797,7 +805,7 @@ class Game {
       })),
       row: this.row.map((c) => (c ? pub(c) : null)),
       tradeDeckCount: this.tradeDeck.length,
-      tradeDeckTotal: tradeDeckSize(this.deckMult),
+      tradeDeckTotal: tradeDeckSize(this.deckMult, !!this.settings.heroes),
       explorers: this.explorers,
       active: active.map((p) => p.id),
       turn: active[0] ? active[0].id : null,

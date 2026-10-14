@@ -334,6 +334,65 @@
     return s;
   }
 
+  // ── портрет героя: фигура по пояс в форме своей фракции ──
+  function portrait(r, F, f, d) {
+    const elite = d.cost >= 5;
+    const skin = f === 'blob' ? '#5f9a5a' : f === 'machine' ? '#8d8f96' : ['#e2b48f', '#c99673', '#a87557', '#f0c9a6'][Math.floor(r() * 4)];
+    const coat = mix(F.dark, '#000000', 0.25), trim = F.color;
+    let g = `<g transform="translate(150 ${elite ? 8 : -6}) scale(${elite ? 1.12 : 1.1})">`;
+    // свечение за спиной
+    g += `<ellipse cx="0" cy="96" rx="90" ry="78" fill="url(#glow)" opacity=".35"/>`;
+    // плечи и мундир
+    g += `<path d="M-92 180 C-88 132 -60 116 -30 110 L30 110 C60 116 88 132 92 180 Z" fill="${coat}" stroke="${mix(trim, '#000000', 0.3)}" stroke-width="1.5"/>`;
+    g += `<path d="M-30 110 L0 150 L30 110" fill="none" stroke="${trim}" stroke-width="3"/>`;
+    // эполеты
+    g += `<path d="M-78 128 q18 -14 40 -12 l-2 8 q-20 0 -34 10 z" fill="url(#acc)"/><path d="M78 128 q-18 -14 -40 -12 l2 8 q20 0 34 10 z" fill="url(#acc)"/>`;
+    // знак на груди; у старших героев — высокий воротник и ряд наград
+    g += `<circle cx="-34" cy="146" r="7" fill="url(#acc)" stroke="#000" stroke-opacity=".4"/>`;
+    if (elite) {
+      g += `<path d="M-40 112 L-22 84 L-14 108 Z M40 112 L22 84 L14 108 Z" fill="${mix(trim, '#000000', 0.2)}" stroke="${F.light}" stroke-width=".8"/>`;
+      g += [0, 1, 2].map((i) => `<rect x="${22 + i * 9}" y="138" width="6" height="12" rx="1" fill="${i === 1 ? F.light : trim}" stroke="#000" stroke-opacity=".4"/>`).join('');
+      g += `<ellipse cx="0" cy="96" rx="110" ry="96" fill="url(#glow)" opacity=".25"/>`;
+    }
+    // шея и голова
+    g += `<rect x="-11" y="88" width="22" height="26" rx="6" fill="${mix(skin, '#000000', 0.25)}"/>`;
+    g += `<ellipse cx="0" cy="66" rx="27" ry="32" fill="${skin}"/>`;
+    g += `<ellipse cx="-8" cy="56" rx="9" ry="12" fill="#fff" opacity=".12"/>`;
+    if (f === 'blob') {
+      // капюшон-панцирь и светящиеся глаза
+      g += `<path d="M-36 80 C-44 30 -20 18 0 18 C20 18 44 30 36 80 C28 60 20 50 0 50 C-20 50 -28 60 -36 80 Z" fill="${mix(F.color, '#000000', 0.35)}"/>`;
+      g += `<ellipse cx="-10" cy="66" rx="6" ry="3.5" fill="${F.light}"/><ellipse cx="10" cy="66" rx="6" ry="3.5" fill="${F.light}"/>`;
+      g += `<circle cx="-10" cy="66" r="10" fill="url(#glow)" opacity=".7"/><circle cx="10" cy="66" r="10" fill="url(#glow)" opacity=".7"/>`;
+      if (elite) g += `<path d="M-24 26 L-30 4 L-14 20 L0 -2 L14 20 L30 4 L24 26 Z" fill="${F.color}" stroke="${F.light}" stroke-width="1"/>`;
+    } else if (f === 'machine') {
+      // шлем с оптикой
+      g += `<path d="M-30 64 C-30 30 30 30 30 64 L30 72 L-30 72 Z" fill="url(#hull)"/>`;
+      g += `<rect x="-24" y="60" width="48" height="10" rx="5" fill="#120607"/><circle cx="9" cy="65" r="4" fill="${F.light}"/><circle cx="9" cy="65" r="11" fill="url(#glow)"/>`;
+      g += `<path d="M-30 74 L-38 92 M30 74 L38 92" stroke="url(#hull)" stroke-width="5"/>`;
+      if (elite) g += `<path d="M-14 34 L-22 6 M14 34 L22 6" stroke="url(#hull)" stroke-width="3"/><circle cx="-22" cy="6" r="3" fill="${F.light}"/><circle cx="22" cy="6" r="3" fill="${F.light}"/>`;
+    } else if (f === 'empire') {
+      // высокий шлем с гребнем
+      g += `<path d="M-29 62 C-30 26 30 26 29 62 Z" fill="url(#hull)"/><path d="M0 14 L7 40 L0 46 L-7 40 Z" fill="url(#acc)"/>`;
+      g += `<rect x="-30" y="58" width="60" height="6" fill="url(#acc)"/><rect x="-16" y="68" width="32" height="5" rx="2" fill="#16202c" opacity=".85"/>`;
+      if (elite) g += `<path d="M-30 110 C-60 120 -70 160 -80 180 L-60 180 C-56 150 -44 126 -30 116 Z M30 110 C60 120 70 160 80 180 L60 180 C56 150 44 126 30 116 Z" fill="#5a1414" opacity=".9"/>`;
+    } else if (f === 'trade') {
+      // фуражка капитана
+      g += `<path d="M-30 50 C-28 30 28 30 30 50 Z" fill="${coat}"/><path d="M-34 50 L34 50 L26 58 L-26 58 Z" fill="#111"/><circle cx="0" cy="42" r="5" fill="url(#acc)"/>`;
+      g += `<path d="M-14 66 h10 M4 66 h10" stroke="#2b2b2b" stroke-width="3" stroke-linecap="round"/>`;
+      if (elite) g += `<path d="M-12 82 q12 8 24 0" stroke="#5a4636" stroke-width="4" fill="none"/><circle cx="9" cy="66" r="6" fill="none" stroke="${F.light}" stroke-width="1.2"/>`;
+    } else if (d.scrap.some((e) => e.choose)) {
+      // контрабандист: широкополая шляпа
+      g += `<ellipse cx="0" cy="46" rx="44" ry="8" fill="#2a2420"/><path d="M-24 46 C-22 22 22 22 24 46 Z" fill="#3a302a"/><rect x="-24" y="40" width="48" height="5" fill="${trim}" opacity=".6"/>`;
+      g += `<path d="M-16 66 h10 M6 66 h10" stroke="#222" stroke-width="3" stroke-linecap="round"/><path d="M-14 80 q14 6 28 0" stroke="#3b2d22" stroke-width="3" fill="none"/>`;
+    } else {
+      // наёмник: повязка и шрам
+      g += `<path d="M-30 56 C-30 30 30 30 30 56 C20 44 -20 44 -30 56 Z" fill="#3a3f4a"/>`;
+      g += `<path d="M-28 60 L28 58" stroke="#6b1f1f" stroke-width="5"/><path d="M-16 66 h10 M6 66 h10" stroke="#222" stroke-width="3" stroke-linecap="round"/><path d="M14 72 l6 12" stroke="#7a3b2e" stroke-width="1.5"/>`;
+    }
+    g += `</g>`;
+    return g;
+  }
+
   function svg(cid) {
     const d = window.CARDS[cid];
     const f = d.faction, F = window.FACTIONS[f];
@@ -344,7 +403,8 @@
     defs += nebula('n2', Math.floor(r() * 999), (0.01 + r() * 0.008).toFixed(4), SECOND[f], 0.45 + r() * 0.15);
     defs += objDefs(F, f);
     let body = `<rect width="${W}" height="${H}" fill="#02030a"/><rect width="${W}" height="${H}" filter="url(#n2)"/><rect width="${W}" height="${H}" filter="url(#n1)"/>` + stars(r);
-    if (d.type === 'base') {
+    if (d.type === 'hero') body += portrait(r, F, f, d);
+    else if (d.type === 'base') {
       if (!d.outpost) body += planet(r, F, f);
       else if (f === 'empire') body += hash(cid) % 2 ? citadel(r, F) : station(r, F);
       else if (f === 'machine') body += hash(cid) % 3 === 0 ? station(r, F) : asteroidBase(r, F);

@@ -283,6 +283,29 @@ t('сводка хода: покупки, урон, построенные и у
   assert.deepEqual(h.killed, [{ owner: 'p1', cid: 'b_hive' }]);
 });
 
+t('герои: в колоде только если включены; наём, союз, отправка в бой', () => {
+  const plain = new Game([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], { authority: 50 });
+  const withH = new Game([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], { authority: 50, heroes: true });
+  const all = (g) => [...g.tradeDeck, ...g.row.filter(Boolean)];
+  assert.equal(all(plain).filter((c) => c.cid.startsWith('h_')).length, 0);
+  assert.equal(all(withH).filter((c) => c.cid.startsWith('h_')).length, 10);
+  const { g } = setup(2, ['b_fighter']);
+  g.row[0] = { uid: 'hx', cid: 'h_packleader' };
+  g.purse.p0 = 2;
+  g.act('p0', { type: 'buy', slot: 0 });
+  const p = g.pl('p0');
+  assert.equal(p.heroes.length, 1);
+  assert.ok(!p.discard.some((c) => c.uid === 'hx'));
+  const h0 = p.hand.length;
+  g.act('p0', { type: 'playAll' });              // Жалохват: союз Роя от героя — взять карту
+  assert.equal(p.hand.length, h0 - 1 + 1);
+  const c0 = g.pool.combat;
+  g.act('p0', { type: 'scrap', uid: 'hx' });     // Вожак стаи: +4 урона и уходит из игры
+  assert.equal(g.pool.combat, c0 + 4);
+  assert.equal(p.heroes.length, 0);
+  assert.ok(![...p.deck, ...p.discard, ...p.hand, ...p.inPlay].some((c) => c.uid === 'hx'));
+});
+
 t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
   const g = teams();
   const t0 = g.turnNo;

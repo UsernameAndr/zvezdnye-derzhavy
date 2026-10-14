@@ -104,6 +104,23 @@
   B('m_forge',      'machine', 'Кузница',             7, 1, 6, true, [{ machineBase: 1 }]);
   B('m_brain',      'machine', 'Ядро Разума',         8, 1, 6, true, [{ brain: 2 }]);
 
+  /* ── Герои (дополнение, включает хост) ──
+   * Покупаются из торгового ряда, но не идут в колоду: герой сразу встаёт рядом с вами и остаётся,
+   * пока вы его не отпустите. Пока герой рядом, он — союзник своей фракции для всех ваших карт
+   * (в режиме 2 на 2 — и для карт напарника). В свой ход героя можно утилизировать ради разового эффекта.
+   */
+  const Hr = (id, faction, name, cost, scrap) => add({ id, faction, name, cost, count: 1, type: 'hero', scrap });
+  Hr('h_packleader',  'blob',    'Вожак стаи',          2, [{ combat: 4 }]);
+  Hr('h_broodqueen',  'blob',    'Королева выводка',    6, [{ combat: 5 }, { draw: 1 }]);
+  Hr('h_envoy',       'trade',   'Посол Лиги',          2, [{ auth: 5 }]);
+  Hr('h_magnate',     'trade',   'Магнат',              5, [{ trade: 4 }, { auth: 3 }]);
+  Hr('h_guardcapt',   'empire',  'Капитан гвардии',     3, [{ combat: 2 }, { draw: 1 }]);
+  Hr('h_grandadm',    'empire',  'Гранд-адмирал',       6, [{ draw: 2 }, { opDiscard: 1 }]);
+  Hr('h_technopriest','machine', 'Техножрец',           2, [{ scrapHD: 1 }]);
+  Hr('h_architect',   'machine', 'Архитектор Ордена',   5, [{ combat: 4 }, { scrapHD: 1 }]);
+  Hr('h_mercenary',   'none',    'Наёмник',             3, [{ combat: 5 }]);
+  Hr('h_smuggler',    'none',    'Контрабандист',       3, [{ choose: [[{ trade: 4 }], [{ combat: 4 }]] }]);
+
   const api = { FACTIONS, CARDS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else Object.assign(root, api);

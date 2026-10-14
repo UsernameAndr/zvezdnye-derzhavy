@@ -499,3 +499,6 @@ button.stat:hover { border-color: #4a5870; }
 .opps-area .tm-mem { font-size: 12px; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
 .opps-area .team-card > .zl { display: none; }
 .opps-area .opp-bases { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+/* герои */
+.card.is-hero { box-shadow: 0 0 0 1px var(--fl) inset, 0 0 10px -2px var(--fc); }
+.card.is-hero.mini::after { content: 'герой'; position: absolute; left: 3px; top: 3px; z-index: 2; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; background: rgba(5, 7, 12, .8); color: var(--fl); padding: 0 3px; border-radius: 2px; }

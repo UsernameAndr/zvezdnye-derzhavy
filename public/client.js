@@ -149,10 +149,11 @@
   }
   const abil = (list) => list.map(effShort).join('');
 
-  function typeName(d) { return d.type === 'base' ? (d.outpost ? 'Аванпост' : 'База') : 'Корабль'; }
+  function typeName(d) { return d.type === 'hero' ? 'Герой' : d.type === 'base' ? (d.outpost ? 'Аванпост' : 'База') : 'Корабль'; }
   function typeExplain(d) {
     if (d.id === 'scout' || d.id === 'viper') return 'Стартовая карта. Корабль: действует в тот ход, когда его сыграли, затем уходит в сброс.';
     if (d.id === 'explorer') return 'Старатель всегда доступен для покупки, цена — 2. Корабль: действует в тот ход, когда его сыграли.';
+    if (d.type === 'hero') return `Герой. При покупке не идёт в колоду, а сразу встаёт рядом с вами и остаётся там.${d.faction !== 'none' ? ` Пока он рядом, у ваших карт фракции «${FACTIONS[d.faction].name}» срабатывают союзные способности.` : ' Нейтральный — союзником не считается.'} В свой ход его можно отправить в бой: получите эффект, а герой уйдёт из игры.`;
     if (d.type !== 'base') return 'Корабль. Действует в тот ход, когда вы его сыграли, затем уходит в сброс и вернётся с новой колодой.';
     if (d.outpost) return `Аванпост. Остаётся на столе и действует каждый ваш ход. Пока он стоит, соперники не могут атаковать вас и ваши другие базы — сначала им придётся потратить ${d.defense} урона на него.`;
     return `База. Остаётся на столе и действует каждый ваш ход. Соперник может уничтожить её, потратив ${d.defense} урона.`;
@@ -162,7 +163,7 @@
   function summary(d) {
     const parts = [];
     const one = (e) => { const k = Object.keys(e)[0], v = e[k]; return I[k] ? `<span>${I[k]}${v}</span>` : ''; };
-    for (const e of d.primary) {
+    for (const e of d.type === 'hero' ? d.scrap : d.primary) {
       const k = Object.keys(e)[0];
       if (k === 'choose') parts.push(`<span>${e.choose.map((o) => o.map(one).join('')).join('/')}</span>`);
       else if (I[k] && k !== 'draw') parts.push(one(e));
@@ -183,6 +184,7 @@
     }
     return out;
   }
+  const heroesHTML = (list, size, zone, owner) => (list || []).map((h) => cardHTML(h, { size, cls: 'hero-card', attrs: `data-zone="${zone}"`, badge: owner ? `<span class="owner-tag">${esc(owner)}</span>` : '' })).join('');
   const stackBadge = (n) => (n > 1 ? `<span class="stack-n" title="Одинаковых карт: ${n}">×${n}</span>` : '');
 
   function cardHTML(c, o = {}) {
@@ -195,7 +197,7 @@
     const style = `--fc:${F.color};--fd:${F.dark};--fl:${F.light}`;
     const attrs = `data-cid="${cid}" ${c.uid ? `data-uid="${c.uid}"` : ''} ${o.attrs || ''}`;
     const art = `<img class="c-art" src="${window.cardArtURL(cid)}" alt="" draggable="false">`;
-    const cls = `card ${size} f-${d.faction} ${base ? 'is-base' : ''} ${d.outpost ? 'is-outpost' : ''} ${o.undo ? 'has-undo' : ''} ${o.cls || ''}`;
+    const cls = `card ${size} f-${d.faction} ${d.type === 'hero' ? 'is-hero' : ''} ${base ? 'is-base' : ''} ${d.outpost ? 'is-outpost' : ''} ${o.undo ? 'has-undo' : ''} ${o.cls || ''}`;
     const undoBtn = o.undo ? `<button class="c-undo" data-act="undo" data-uid="${o.undoUid || c.uid}" title="Вернуть карту в руку" aria-label="Вернуть карту в руку">×</button>` : '';
     const defBadge = base ? `<span class="c-def ${d.outpost ? 'out' : ''}" title="${d.outpost ? 'Аванпост — защищает владельца' : 'Защита базы'}">${d.defense}</span>` : '';
     if (size === 'mini') {
@@ -206,6 +208,8 @@
         ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}</div>`;
     }
     let prim = abil(d.primary);
+    const hero = d.type === 'hero';
+    if (hero) prim = `<span class="ef tx">${d.faction !== 'none' ? `Пока рядом — союзник: ${F.name}` : 'Нейтральный герой'}</span>`;
     if (d.fleetHQ) prim += `<span class="ef tx">Все ваши корабли получают +1 урона</span>`;
     if (d.allAlly) prim += `<span class="ef tx">Считается союзником для карт любой фракции</span>`;
     return `<div class="${cls}" ${attrs} style="${style}">
@@ -215,7 +219,7 @@
       <div class="c-text">
         ${prim ? `<div class="ab ab-p ${o.manual && base && d.primary.length && !used.primary ? 'ready' : ''}">${prim}</div>` : ''}
         ${d.ally.length ? `<div class="ab ab-a ${used.ally ? 'done' : ''}"><span class="lbl">${emblem(d.faction)}Союз</span>${abil(d.ally)}</div>` : ''}
-        ${d.scrap.length ? `<div class="ab ab-s"><span class="lbl">${TRASH}Утиль</span>${abil(d.scrap)}</div>` : ''}
+        ${d.scrap.length ? `<div class="ab ab-s"><span class="lbl">${hero ? '⚔ В бой' : `${TRASH}Утиль`}</span>${abil(d.scrap)}</div>` : ''}
       </div>
       ${o.badge || ''}${undoBtn}
       ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}
@@ -233,7 +237,8 @@
     if (d.fleetHQ) info += `<h5>Постоянно</h5><ul><li>Каждый корабль, который вы играете, даёт дополнительно +1 урона.</li></ul>`;
     if (d.allAlly) info += `<h5>Постоянно</h5><ul><li>Пока эта база в игре, у всех ваших карт срабатывают союзные способности.</li></ul>`;
     if (d.ally.length) info += `<h5>${emblem(d.faction)} Союзная способность</h5><p class="muted">Срабатывает, если в этот ход у вас в игре есть ещё одна карта фракции «${F.name}» (корабль или база).</p>${list(d.ally)}`;
-    if (d.scrap.length) info += `<h5>${TRASH} Утилизация</h5><p class="muted">Кнопкой «Утилизировать»: карта навсегда уходит из игры, а вы получаете эффект.</p>${list(d.scrap)}`;
+    if (d.type === 'hero') info += `<h5>⚔ Отправить в бой</h5><p class="muted">В свой ход, кнопкой «В бой»: герой уходит из игры, а вы получаете эффект.</p>${list(d.scrap)}`;
+    else if (d.scrap.length) info += `<h5>${TRASH} Утилизация</h5><p class="muted">Кнопкой «Утилизировать»: карта навсегда уходит из игры, а вы получаете эффект.</p>${list(d.scrap)}`;
     return `<div class="detail"><div class="d-card">${cardHTML({ cid, copied: null }, { size: 'lg' })}</div><div class="d-info">${info}${actions ? `<div class="d-actions">${actions}</div>` : ''}</div></div>`;
   }
 
@@ -283,6 +288,7 @@
       <p>У каждого колода из 10 карт: 8 «Курьеров» (+1 к деньгам) и 2 «Перехватчика» (+1 урона). Первый игрок начинает с 3 картами, второй — с 5 (в игре на троих и больше: 3, 4, затем по 5). Когда колода кончается, сброс перемешивается в новую колоду.</p>
       <p><b>Передумали?</b> На сыгранной карте есть крестик — он возвращает её в руку. Вернуть карту можно, пока вы ничего не купили и не атаковали и пока эта карта не дала взять новые карты (их уже видно).</p>
       <p><b>Корабли</b> действуют один ход и уходят в сброс. <b>Базы</b> остаются на столе и действуют каждый ваш ход; простые эффекты баз срабатывают сами, а если нужно выбирать — нажмите «Использовать». Чтобы уничтожить базу, потратьте урон, равный её защите (число в щите). Тёмный щит — <b>аванпост</b>: он защищает владельца и его остальные базы.</p>
+      <p><b>Герои</b> (если хост их включил) покупаются из торгового ряда, но не идут в колоду: герой сразу встаёт рядом с вами. Пока он рядом, он союзник своей фракции — у ваших карт этой фракции срабатывают союзные способности. В любой момент своего хода героя можно отправить в бой: получите его эффект, а герой уйдёт из игры.</p>
       <h4>Фракции</h4>
       <div class="fac-list">
         <div>${emblem('blob')} <b>Рой</b> — много урона, чистит торговый ряд.</div>
@@ -416,6 +422,8 @@
           ${host ? `<label class="custom">Своё значение <input id="l-auth" type="number" min="1" max="999" value="${st.authority}"></label>` : ''}
         </div>
         ${teamsMode ? '' : `<div class="set"><div class="set-l">Мест за столом</div><div class="segs">${chips('maxPlayers', [2, 3, 4, 5, 6], st.maxPlayers)}</div></div>`}
+        <div class="set"><div class="set-l">Дополнение «Герои»</div><div class="segs">${chips('heroes', [true, false], st.heroes !== false, (v) => (v ? 'С героями' : 'Без героев'))}</div>
+          ${st.heroes !== false ? '<p class="muted small set-note">В торговую колоду добавляются 10 героев. Купленный герой встаёт рядом с игроком, считается союзником своей фракции, а в нужный момент его можно отправить в бой ради разового эффекта.</p>' : ''}</div>
         <div class="set"><div class="set-l">Торговая колода</div><div class="segs">${chips('deckSize', ['auto', '1', '1.5', '2'], String(st.deckSize || 'auto'), (v) => deckLbl[v])}</div>
           <p class="muted small set-note">${String(st.deckSize || 'auto') === 'auto' ? 'Авто: 80 карт на 2–3 игроков, 120 на 4, 160 на 5–6.' : 'Карт в торговой колоде на всю партию.'}</p></div>
         <div class="set"><div class="set-l">Время на ход</div><div class="segs">${chips('turnTime', ['off', '60', '120'], String(st.turnTime || 'off'), (v) => ({ off: 'Без ограничения', 60: '1 минута', 120: '2 минуты' })[v])}</div>
@@ -611,7 +619,7 @@
         const b = all[0];
         const can = canAttackBase(C, p, b);
         return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}`, badge: stackBadge(all.length) });
-      }).join('');
+      }).join('') + heroesHTML(p.heroes, 'mini', 'opphero');
       const atk = canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${p.id}">Атаковать</button>` : '';
       return `<div class="opp ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
         <div class="opp-head g2"><span class="avatar">${esc(initial(p.name))}</span>
@@ -688,10 +696,13 @@
           if (d.scrap.length) acts += `<button class="mini-btn" data-act="scrap" data-uid="${b.uid}">${mobile ? 'Утиль' : 'Утилизировать'}</button>`;
         }
         return cardHTML(b, { size: ps, actions: acts, manual: true, attrs: 'data-zone="mybase"', undo: myTurn && !!undoUid, undoUid, badge: (teams ? '<span class="owner-tag">ваша</span>' : '') + stackBadge(all.length) });
-      }).join('') + (teams && mate && mate.alive ? stacks(mate.bases).map(({ all }) => cardHTML(all[0], { size: ps, attrs: 'data-zone="matebase"', badge: `<span class="owner-tag">${esc(mate.name)}</span>` + stackBadge(all.length) })).join('') : '');
+      }).join('') + (teams && mate && mate.alive ? stacks(mate.bases).map(({ all }) => cardHTML(all[0], { size: ps, attrs: 'data-zone="matebase"', badge: `<span class="owner-tag">${esc(mate.name)}</span>` + stackBadge(all.length) })).join('') : '')
+        + (me.heroes || []).map((h) => cardHTML(h, { size: ps, cls: 'hero-card', attrs: 'data-zone="myhero"', actions: myTurn && !blocked ? `<button class="mini-btn use" data-act="scrap" data-uid="${h.uid}">${mobile ? '⚔ В бой' : '⚔ Отправить в бой'}</button>` : '', badge: teams ? '<span class="owner-tag">ваш герой</span>' : '' })).join('')
+        + (teams && mate && mate.alive ? heroesHTML(mate.heroes, ps, 'matehero', mate.name) : '');
+      const hasHeroes = (me.heroes || []).length || (teams && mate && (mate.heroes || []).length);
       const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
       const top = me.discard[me.discard.length - 1];
-      basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''} ${bases ? '' : 'empty'}"><div class="zl">${teams ? `Базы команды${g.players.some((x) => x.team === me.team && x.alive && x.bases.some((b) => CARDS[b.cid].outpost)) ? ' · 🛡 аванпост защищает вас обоих' : ''}` : 'Ваши базы'}</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
+      basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''} ${bases ? '' : 'empty'}"><div class="zl">${hasHeroes ? (teams ? 'Базы и герои команды' : 'Ваши базы и герои') : teams ? `Базы команды${g.players.some((x) => x.team === me.team && x.alive && x.bases.some((b) => CARDS[b.cid].outpost)) ? ' · 🛡 аванпост защищает вас обоих' : ''}` : 'Ваши базы'}</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
       mineHTML = `
         <div class="spacer"></div>${infoHTML}
         <section class="zone hand-zone ${tip.cue === 'hand' ? 'cue' : ''} ${hand ? '' : 'empty'}"><div class="zl">Рука${me.pendingDiscard ? ` <span class="tag-s warn">в начале хода сбросите ${me.pendingDiscard}</span>` : ''}</div><div class="strip hand">${hand || '<span class="none">Рука пуста</span>'}</div></section>
@@ -796,7 +807,7 @@
       const b = all[0];
       const can = canAttackBase(C, m, b);
       return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${m.id}" ${can ? `data-act="atkbase" data-target="${m.id}"` : ''}`, badge: `<span class="owner-tag">${esc(m.name)}</span>` + stackBadge(all.length) });
-    })).join('');
+    })).join('') + alive.map((m) => heroesHTML(m.heroes, 'mini', 'opphero', m.name)).join('');
     return `<div class="opp team-card ${isTurn ? 'turn' : ''} ${alive.length ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
       <div class="opp-head g2 noav"><div class="nm-line"><b>Команда соперников</b></div>
         <div class="hp-badge ${hp <= 10 ? 'low' : ''}" title="Здоровье команды">${hp}</div>
@@ -884,6 +895,7 @@
       if (d.scrap.length) a += `<button class="btn" data-act="scrap" data-uid="${uid}">Утилизировать</button>`;
       return a;
     }
+    if (zone === 'myhero') return `<button class="btn primary" data-act="scrap" data-uid="${uid}">⚔ Отправить в бой</button>`;
     if (zone === 'play' && d.scrap.length && C.cur.id === S.pid) return `<button class="btn" data-act="scrap" data-uid="${uid}">Утилизировать</button>`;
     return '';
   }
@@ -910,6 +922,7 @@
       <div class="os-stats"><span>${I.auth} здоровье${C.teams ? ' команды' : ''} <b>${Math.max(0, p.authority)}</b></span>${stats}</div>
       ${C.hasOutpost(p) ? `<p class="muted">Защищён аванпостом${C.teams ? ' команды' : ''}: сначала уничтожьте аванпост, потом можно атаковать ${C.teams ? 'команду' : 'игрока'} и другие базы.</p>` : ''}
       <div class="sec-title">Базы</div><div class="ob-grid">${bases || '<span class="none">Нет баз</span>'}</div>
+      ${members.some((m) => (m.heroes || []).length) ? `<div class="sec-title">Герои</div><div class="ob-grid">${members.map((m) => heroesHTML(m.heroes, 'sm', 'opphero', C.teams ? m.name : null)).join('')}</div>` : ''}
       ${canAtk ? `<div class="m-actions"><button class="btn danger big" data-act="atkplayer" data-target="${target.id}">Атаковать${C.teams ? ' команду' : ''} (${Math.min(C.g.pool.combat, target.authority)} урона)</button></div>` : ''}`;
     if (refresh && $('.modal.opp-modal')) { $('.modal.opp-modal').innerHTML = '<button class="x" data-act="close-modal">×</button>' + html; return; }
     openModal(html, { kind: 'opp', cls: 'opp-modal', sheet: true });
@@ -931,7 +944,7 @@
     const p = C.mate;
     if (!p) return;
     const hand = (p.hand || []).map((c) => cardHTML(c, { size: 'sm', attrs: 'data-zone="matehand"' })).join('');
-    const bases = stacks(p.bases).map(({ all }) => cardHTML(all[0], { size: 'sm', attrs: 'data-zone="matebase"', badge: stackBadge(all.length) })).join('');
+    const bases = stacks(p.bases).map(({ all }) => cardHTML(all[0], { size: 'sm', attrs: 'data-zone="matebase"', badge: stackBadge(all.length) })).join('') + heroesHTML(p.heroes, 'sm', 'matehero');
     const html = `<h3>${esc(p.name)} — напарник</h3>
       <div class="os-stats"><span>в колоде ${p.deckCount}</span><button class="lnk" data-act="view-discard" data-pid="${p.id}">сброс ${p.discard.length}</button>${(C.g.ready || []).includes(p.id) ? '<span class="ok">готов завершить ход</span>' : ''}</div>
       <div class="sec-title">Рука</div><div class="ob-grid">${hand || '<span class="none">Пусто</span>'}</div>
