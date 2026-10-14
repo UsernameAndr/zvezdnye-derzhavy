@@ -427,7 +427,62 @@
     return g;
   }
 
-  function svg(cid) {
+  // ── «экшен» поверх сцены: лазеры, взрывы, следы скорости, эскорт ──
+  const combatOf = (list) => list.reduce((s, e) => { const k = Object.keys(e)[0]; return s + (k === 'combat' ? e.combat : k === 'choose' ? Math.max(...e.choose.map(combatOf)) : k === 'destroyBase' || k === 'destroyBaseMax' ? 3 : 0); }, 0);
+  function burst(x, y, R, r) {
+    let g = `<circle cx="${n(x)}" cy="${n(y)}" r="${n(R * 1.9)}" fill="url(#boom)" opacity=".9"/>`;
+    for (let i = 0; i < 9; i++) { const a = r() * Math.PI * 2, L = R * (0.9 + r() * 1.3); g += `<path d="M${n(x)} ${n(y)} L${n(x + Math.cos(a) * L)} ${n(y + Math.sin(a) * L)}" stroke="#ffd27a" stroke-width="${n(0.8 + r() * 1.6)}" stroke-linecap="round" opacity=".85"/>`; }
+    for (let i = 0; i < 7; i++) { const a = r() * Math.PI * 2, L = R * (1.2 + r() * 1.6); g += `<circle cx="${n(x + Math.cos(a) * L)}" cy="${n(y + Math.sin(a) * L)}" r="${n(0.8 + r() * 1.8)}" fill="#ffb347"/>`; }
+    return g + `<circle cx="${n(x)}" cy="${n(y)}" r="${n(R * 0.45)}" fill="#fff8e0"/>`;
+  }
+  function shipAction(r, F, d, cx, cy, rot, sc, compact) {
+    const pw = combatOf(d.primary) + combatOf(d.ally) * 0.5;
+    const a = rot * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+    let back = '', front = '';
+    // следы скорости позади корабля
+    for (let i = 0; i < 9; i++) {
+      const off = (r() - 0.5) * 70 * sc, len = 60 + r() * 110, st = -70 * sc - r() * 30;
+      const x1 = cx + ca * st - sa * off, y1 = cy + sa * st + ca * off;
+      back += `<path d="M${n(x1)} ${n(y1)} L${n(x1 - ca * len)} ${n(y1 - sa * len)}" stroke="${i % 3 ? '#ffffff' : F.light}" stroke-width="${n(0.5 + r() * 1.2)}" opacity="${n(0.15 + r() * 0.3)}" stroke-linecap="round"/>`;
+    }
+    if (pw > 0) {
+      // лазерные залпы вперёд
+      const shots = Math.min(5, 1 + Math.floor(pw / 2));
+      for (let i = 0; i < shots; i++) {
+        const off = (r() - 0.5) * 36 * sc, st = 70 * sc + r() * 50, len = 40 + r() * 60;
+        const x1 = cx + ca * st - sa * off, y1 = cy + sa * st + ca * off;
+        const x2 = x1 + ca * len, y2 = y1 + sa * len;
+        front += `<path d="M${n(x1)} ${n(y1)} L${n(x2)} ${n(y2)}" stroke="${F.color}" stroke-width="5" opacity=".35" stroke-linecap="round" filter="url(#blur2)"/>`;
+        front += `<path d="M${n(x1)} ${n(y1)} L${n(x2)} ${n(y2)}" stroke="${F.light}" stroke-width="1.6" stroke-linecap="round"/>`;
+      }
+      // взрывы — у сильных кораблей
+      const booms = pw >= 7 ? 3 : pw >= 4 ? 2 : pw >= 2 ? 1 : 0;
+      for (let i = 0; i < booms; i++) front += compact ? burst(168 + r() * 40, 50 + r() * 80, (5 + r() * 5 + pw * 0.3), r) : burst(215 + r() * 70, 18 + r() * 140, 7 + r() * 9 + pw * 0.4, r);
+      // мелкие вражеские истребители под огнём
+      if (pw >= 3 && !compact) for (let i = 0; i < 2; i++) { const x = 230 + r() * 55, y = 20 + r() * 140; front += `<path d="M${n(x)} ${n(y)} l-9 -3 l3 3 l-3 3 z" fill="#2a2f3a" stroke="#8b94a6" stroke-width=".6" opacity=".9"/>`; }
+    } else {
+      // мирный корабль: строй сопровождения и огни пути
+      for (let i = 0; i < 3; i++) { const x = 40 + r() * 70, y = 20 + r() * 140; front += `<path d="M${n(x)} ${n(y)} l-10 -2.5 l2 2.5 l-2 2.5 z" fill="${F.light}" opacity=".55"/>`; }
+      front += `<circle cx="${n(cx + ca * 120 * sc)}" cy="${n(cy + sa * 120 * sc)}" r="10" fill="url(#glow)" opacity=".6"/>`;
+    }
+    return { back, front };
+  }
+  function baseAction(r, F, d) {
+    const pw = combatOf(d.primary);
+    let g = '';
+    // огни на орбите
+    for (let i = 0; i < 6; i++) { const a = r() * Math.PI * 2; g += `<circle cx="${n(150 + Math.cos(a) * 110)}" cy="${n(95 + Math.sin(a) * 30)}" r="1.4" fill="${F.light}" opacity=".9"/>`; }
+    if (pw > 0 || d.outpost) {
+      // оборона: луч в сторону врага и взрыв на подлёте
+      const x2 = 255 + r() * 30, y2 = 20 + r() * 40;
+      g += `<path d="M150 80 L${n(x2)} ${n(y2)}" stroke="${F.color}" stroke-width="5" opacity=".35" filter="url(#blur2)"/><path d="M150 80 L${n(x2)} ${n(y2)}" stroke="${F.light}" stroke-width="1.4"/>`;
+      g += burst(x2, y2, 8 + pw, r);
+    }
+    return g;
+  }
+
+  // compact — вариант для маленьких карт: корабль целиком и по центру (на мини-карте видна только середина картинки)
+  function svg(cid, compact) {
     const d = window.CARDS[cid];
     const f = d.faction, F = window.FACTIONS[f];
     const r = rng(hash(cid));
@@ -436,6 +491,7 @@
     defs += nebula('n1', Math.floor(r() * 999), (0.006 + r() * 0.006).toFixed(4), f === 'none' ? '#55657f' : F.color, 0.5 + r() * 0.15);
     defs += nebula('n2', Math.floor(r() * 999), (0.01 + r() * 0.008).toFixed(4), SECOND[f], 0.45 + r() * 0.15);
     defs += objDefs(F, f);
+    defs += `<radialGradient id="boom"><stop offset="0" stop-color="#fff6d0"/><stop offset=".3" stop-color="#ffc34d"/><stop offset=".6" stop-color="#ff5a1f" stop-opacity=".7"/><stop offset="1" stop-color="#ff2a00" stop-opacity="0"/></radialGradient>`;
     let body = `<rect width="${W}" height="${H}" fill="#02030a"/><rect width="${W}" height="${H}" filter="url(#n2)"/><rect width="${W}" height="${H}" filter="url(#n1)"/>` + stars(r);
     if (d.rarity === 'diamond') body += diamondArt(r, d);
     else if (d.type === 'hero') body += portrait(r, F, f, d);
@@ -444,17 +500,22 @@
       else if (f === 'empire') body += hash(cid) % 2 ? citadel(r, F) : station(r, F);
       else if (f === 'machine') body += hash(cid) % 3 === 0 ? station(r, F) : asteroidBase(r, F);
       else body += hash(cid) % 2 ? station(r, F) : citadel(r, F);
+      body += baseAction(r, F, d);
     }
     else {
-      const sc = 0.78 + Math.min(d.cost, 8) * 0.045;
-      const rot = -10 + r() * 14;
-      body += `<g transform="translate(${n(150 + (r() - 0.5) * 16)} ${n(92 + (r() - 0.5) * 12)}) rotate(${n(rot)}) scale(${n(sc)})">`;
+      // корабль крупно и по диагонали — в движении
+      const sc = (0.78 + Math.min(d.cost, 8) * 0.045) * (compact ? 0.62 : 1.32);
+      const rot = compact ? -14 + r() * 6 : -24 + r() * 12;
+      const cx = compact ? 150 : 140 + (r() - 0.5) * 16, cy = compact ? 92 : 100 + (r() - 0.5) * 10;
+      const act = shipAction(r, F, d, cx, cy, rot, sc, compact);
+      body += act.back;
+      body += `<g transform="translate(${n(cx)} ${n(cy)}) rotate(${n(rot)}) scale(${n(sc)})">`;
       if (f === 'trade') body += d.cost <= 2 ? tradeShuttle(r, F) : d.cost >= 5 ? tradeCruiser(r, F) : shipTrade(r, F);
       else if (f === 'empire') body += d.cost <= 2 ? empireFighter(r, F) : d.cost >= 6 ? empireDread(r, F) : shipEmpire(r, F);
       else if (f === 'machine') body += d.cost <= 2 ? machineDrone(r, F) : d.cost >= 6 ? machineHeavy(r, F) : shipMachine(r, F);
       else if (f === 'blob') body += shipBlob(r, F, d.cost);
       else body += shipNeutral(r, F, cid);
-      body += '</g>';
+      body += '</g>' + act.front;
       if (d.cost >= 5 && f !== 'blob') {
         body += `<g transform="translate(${n(40 + r() * 30)} ${n(30 + r() * 20)}) rotate(${n(rot)}) scale(.2)" opacity=".85">` +
           (f === 'trade' ? shipTrade(r, F) : f === 'empire' ? shipEmpire(r, F) : shipMachine(r, F)) + '</g>';
@@ -465,9 +526,10 @@
   }
 
   // URL картинки для <img>
-  window.cardArtURL = function (cid) {
-    if (!cache[cid]) cache[cid] = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(cid));
-    return cache[cid];
+  window.cardArtURL = function (cid, compact) {
+    const key = compact ? cid + ':c' : cid;
+    if (!cache[key]) cache[key] = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg(cid, compact));
+    return cache[key];
   };
   window.cardArtSVG = svg;
 })();

@@ -207,7 +207,7 @@
     const base = d.type === 'base';
     const style = `--fc:${F.color};--fd:${F.dark};--fl:${F.light}`;
     const attrs = `data-cid="${cid}" ${c.uid ? `data-uid="${c.uid}"` : ''} ${o.attrs || ''}`;
-    const art = `<img class="c-art" src="${window.cardArtURL(cid)}" alt="" draggable="false">`;
+    const art = `<img class="c-art" src="${window.cardArtURL(cid, size === 'mini')}" alt="" draggable="false">`;
     const cls = `card ${size} f-${d.faction} ${d.type === 'hero' ? 'is-hero' : ''} ${base ? 'is-base' : ''} ${d.outpost ? 'is-outpost' : ''} ${o.undo ? 'has-undo' : ''} ${o.cls || ''}`;
     const undoBtn = o.undo ? `<button class="c-undo" data-act="undo" data-uid="${o.undoUid || c.uid}" title="Вернуть карту в руку" aria-label="Вернуть карту в руку">×</button>` : '';
     const defBadge = base ? `<span class="c-def ${d.outpost ? 'out' : ''}" title="${d.outpost ? 'Аванпост — защищает владельца' : 'Защита базы'}">${d.defense}</span>` : '';
@@ -218,23 +218,63 @@
         ${c.copied ? '<span class="c-copy">копия</span>' : ''}${o.badge || ''}${undoBtn}
         ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}</div>`;
     }
-    let prim = abil(d.primary);
     const hero = d.type === 'hero';
+    // сколько на карте текста: чем больше, тем меньше картинка и шрифт
+    const isText = (e) => { const k = Object.keys(e)[0]; return !NUM.includes(k) && !(k === 'choose' && numericChoose(e)); };
+    const textN = [...d.primary, ...d.ally, ...d.scrap].filter(isText).length + (d.fleetHQ || d.allAlly || hero ? 1 : 0) + (d.ally.length && d.scrap.length ? 1 : 0);
+    const rows = 1 + (d.ally.length ? 1 : 0) + (d.scrap.length ? 1 : 0);
+    const load = textN + (rows === 3 ? 1 : 0);
+    const dense = load >= 3 ? 'dense2' : load >= 2 ? 'dense' : '';
+    const longWord = Math.max(...d.name.split(/[\s-]+/).map((w) => w.length));
+    const nameCls = longWord > 15 ? 'n-x4' : longWord > 13 ? 'n-xxl' : d.name.length > 16 || longWord > 11 ? 'n-xl' : d.name.length > 11 || longWord > 9 ? 'n-l' : '';
+    let prim = panel(d.primary);
     if (hero) prim = `<span class="ef tx">${d.faction !== 'none' ? `Пока рядом — союзник: ${F.name}` : 'Нейтральный герой'}</span>`;
     if (d.fleetHQ) prim += `<span class="ef tx">Все ваши корабли получают +1 урона</span>`;
     if (d.allAlly) prim += `<span class="ef tx">${d.rarity === 'diamond' ? 'Союзник любой фракции' : 'Считается союзником для карт любой фракции'}</span>`;
-    return `<div class="${cls}" ${attrs} style="${style}">
-      <div class="c-head"><span class="c-name">${esc(d.name)}</span>${d.cost ? `<span class="c-cost">${d.cost}</span>` : ''}</div>
-      <div class="c-artwrap">${art}${c.copied ? '<span class="c-copy">копия · Мимикр</span>' : ''}</div>
-      <div class="c-type">${emblem(d.faction)}${d.faction2 ? emblem(d.faction2) : ''}<span class="tn">${typeName(d)}${d.faction !== 'none' ? ` · ${F.name}${d.faction2 ? ` + ${FACTIONS[d.faction2].name}` : ''}` : ''}</span>${defBadge}</div>
+    return `<div class="${cls} ${dense}" ${attrs} style="${style}">
+      <div class="c-head">
+        <span class="c-badge">${emblem(d.faction)}</span>
+        <div class="c-title ${nameCls}"><span class="c-name">${esc(d.name)}</span><span class="c-sub">${subtitle(d)}</span></div>
+        ${d.cost ? `<span class="c-cost">${d.cost}</span>` : '<span class="c-cost none"></span>'}
+      </div>
+      <div class="c-artwrap">${art}${defBadge}${c.copied ? '<span class="c-copy">копия · Мимикр</span>' : ''}</div>
       <div class="c-text">
         ${prim ? `<div class="ab ab-p ${o.manual && base && d.primary.length && !used.primary ? 'ready' : ''}">${prim}</div>` : ''}
-        ${d.ally.length ? `<div class="ab ab-a ${used.ally ? 'done' : ''}"><span class="lbl">${emblem(d.faction)}Союз</span>${abil(d.ally)}</div>` : ''}
-        ${d.scrap.length ? `<div class="ab ab-s"><span class="lbl">${hero ? '⚔ В бой' : `${TRASH}Утиль`}</span>${abil(d.scrap)}</div>` : ''}
+        ${d.ally.length ? `<div class="ab ab-a ${used.ally ? 'done' : ''}"><span class="band" title="Союз: срабатывает, если в игре есть ещё карта этой фракции">${emblem(d.faction)}</span><div class="ab-c">${panel(d.ally)}</div></div>` : ''}
+        ${d.scrap.length ? `<div class="ab ab-s"><span class="band" title="${hero ? 'Отправить в бой' : 'Утилизация: карта уходит из игры'}">${hero ? '⚔' : TRASH}</span><div class="ab-c">${panel(d.scrap)}</div></div>` : ''}
       </div>
       ${o.badge || ''}${undoBtn}
       ${o.actions ? `<div class="c-actions">${o.actions}</div>` : ''}
     </div>`;
+  }
+
+  window.SD_cardHTML = cardHTML; // для страницы-витрины карт при проверке вёрстки
+
+  // свойства карты крупными значками: монета — деньги, красный — урон, зелёный — здоровье, карта — добор
+  function tokens(list) {
+    return list.map((e) => {
+      const k = Object.keys(e)[0], v = e[k];
+      if (k === 'trade' || k === 'combat' || k === 'auth' || k === 'draw') return `<span class="tok tok-${k}" title="${esc(effPlain(e))}"><b>${v}</b></span>`;
+      if (k === 'choose' && numericChoose(e)) return `<span class="tok-choose">${v.map((o) => tokens(o)).join('<span class="or">или</span>')}</span>`;
+      return '';
+    }).join('');
+  }
+  const NUM = ['trade', 'combat', 'auth', 'draw'];
+  const numericChoose = (e) => e.choose.every((o) => o.every((x) => NUM.includes(Object.keys(x)[0])));
+  function panel(list) {
+    const toks = tokens(list);
+    const texts = list.filter((e) => { const k = Object.keys(e)[0]; return !NUM.includes(k) && !(k === 'choose' && numericChoose(e)); })
+      .map((e) => (Object.keys(e)[0] === 'choose' ? effShort(e) : `<span class="ef tx">${effPlain(e)}</span>`)).join('');
+    // подпись под значками: что они значат
+    const cap = list.map((e) => { const k = Object.keys(e)[0]; return NUM.includes(k) ? effPlain(e) : k === 'choose' && numericChoose(e) ? e.choose.map((o) => o.map(effPlain).join(', ')).join(' или ') : null; }).filter(Boolean).join(' · ');
+    return (toks ? `<div class="toks">${toks}</div><div class="tok-cap">${cap}</div>` : '') + texts;
+  }
+  const FAC_GEN = { blob: 'Роя', trade: 'Лиги', empire: 'Короны', machine: 'Ордена' };
+  function subtitle(d) {
+    if (d.rarity === 'diamond') return `💎 ${d.type === 'base' ? (d.outpost ? 'аванпост' : 'база') : 'корабль'}`;
+    const t = typeName(d);
+    if (d.faction === 'none') return d.type === 'hero' ? 'Нейтральный герой' : t;
+    return `${t} ${FAC_GEN[d.faction]}${d.faction2 ? ` и ${FAC_GEN[d.faction2]}` : ''}`;
   }
 
   function detailHTML(c, actions) {

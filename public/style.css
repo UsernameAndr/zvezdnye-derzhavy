@@ -517,3 +517,85 @@ button.stat:hover { border-color: #4a5870; }
 .atk-hint { color: #ff9c90; font-weight: 700; font-size: 12px; white-space: nowrap; letter-spacing: .02em; }
 /* плашки соперников и напарника — на всю высоту торгового ряда */
 .opps-area .opps { flex: 1 1 auto; grid-auto-rows: minmax(min-content, 1fr); }
+
+/* ═════ карты в стиле настольной игры: рамка фракции, значок, монета, крупные свойства ═════ */
+.card:not(.mini) { border: calc(var(--w) * .028) solid var(--fc); border-radius: calc(var(--w) * .06);
+  background: #07090e; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .6), 0 3px 8px rgba(0, 0, 0, .55); }
+.card:not(.mini)::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 4;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fl) 55%, transparent); }
+.card:not(.mini) .c-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .25em; min-height: 2.6em;
+  padding: .2em .25em .25em .2em; background: linear-gradient(180deg, color-mix(in srgb, var(--fd) 80%, #000), #0a0d13); border-bottom: calc(var(--w) * .018) solid var(--fc); }
+.c-badge { width: 2.15em; height: 2.15em; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: radial-gradient(circle at 40% 35%, #2a2f3a, #07090e 70%); border: .14em solid var(--fc); box-shadow: 0 0 0 1px #000, 0 1px 3px rgba(0, 0, 0, .7); }
+.c-badge .emb { width: 1.35em; height: 1.35em; }
+.c-title { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; line-height: 1.05; }
+.card:not(.mini) .c-name { font-weight: 800; font-size: .95em; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--fl) 60%, transparent); text-underline-offset: .12em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; color: #fff; text-shadow: 0 1px 2px #000; }
+.c-sub { font-size: .62em; color: color-mix(in srgb, var(--fl) 75%, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; margin-top: .15em; font-weight: 600; }
+.card:not(.mini) .c-cost { width: 2.1em; height: 2.1em; font-size: 1.05em; font-weight: 800; border: .1em solid #6b5214;
+  background: radial-gradient(circle at 35% 30%, #fff1b8, #f2cd5a 35%, #c99a24 70%, #7a5a10); box-shadow: 0 1px 3px rgba(0, 0, 0, .7), inset 0 -2px 3px rgba(0, 0, 0, .25); }
+.card:not(.mini) .c-cost.none { visibility: hidden; }
+.card:not(.mini) .c-artwrap { height: 44%; border-bottom: calc(var(--w) * .018) solid var(--fc); }
+.card:not(.mini) .c-artwrap .c-def { position: absolute; right: .3em; bottom: .3em; z-index: 2; box-shadow: 0 1px 3px #000; }
+.card:not(.mini) .c-text { background: linear-gradient(180deg, #0b0e14, #05070b); gap: 0; padding: 0; justify-content: flex-start; }
+.card:not(.mini) .ab { font-size: .78em; }
+.card:not(.mini) .ab-p { flex-direction: column; gap: .2em; padding: .35em .3em; flex: 1; justify-content: center; }
+.card:not(.mini) .ab-a, .card:not(.mini) .ab-s { display: flex; flex-wrap: nowrap; align-items: stretch; gap: 0; padding: 0; background: none;
+  border: 0; border-top: calc(var(--w) * .014) solid color-mix(in srgb, var(--fc) 70%, #000); min-height: 2.3em; }
+.card:not(.mini) .ab-s { border-top-color: #3a414e; }
+.band { flex: none; width: 2.1em; display: grid; place-items: center; background: var(--fc); color: #0b0e14; font-size: 1em; }
+.band .emb { width: 1.35em; height: 1.35em; color: #0b0e14 !important; fill: #0b0e14 !important; }
+.ab-s .band { background: #3a414e; color: #e6ebf3; }
+.ab-s .band .emb { color: #e6ebf3 !important; fill: #e6ebf3 !important; }
+.ab-c { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: .15em; padding: .2em .25em; min-width: 0; }
+.ab-a.done .ab-c { background: color-mix(in srgb, var(--fc) 18%, transparent); }
+.toks { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .25em; }
+.tok { display: inline-grid; place-items: center; width: 1.95em; height: 1.95em; font-size: 1.05em; flex: none; position: relative; }
+.tok b { font-weight: 800; font-size: 1em; line-height: 1; position: relative; z-index: 1; }
+.tok-trade { border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff1b8, #f2cd5a 35%, #c99a24 70%, #7a5a10); color: #2b1f05; box-shadow: 0 1px 2px #000; }
+.tok-combat { border-radius: 50%; background: radial-gradient(circle, #e8483c 0 52%, #fff 53% 60%, #c22c22 61%); color: #fff; box-shadow: 0 1px 2px #000; text-shadow: 0 1px 1px #000; }
+.tok-auth { background: #2fb37a; color: #fff; text-shadow: 0 1px 1px #000; clip-path: polygon(50% 100%, 4% 52%, 4% 22%, 26% 4%, 50% 18%, 74% 4%, 96% 22%, 96% 52%); }
+.tok-draw { width: 1.55em; border-radius: .2em; background: linear-gradient(160deg, #6f86b8, #2c3a5c); border: .1em solid #c9d6f2; color: #fff; text-shadow: 0 1px 1px #000; }
+.tok-draw b::before { content: '+'; font-size: .8em; }
+.tok-choose { display: inline-flex; align-items: center; gap: .2em; }
+.tok-choose .or { font-size: .75em; font-weight: 700; color: var(--accent); text-transform: uppercase; margin: 0 .1em; }
+.card:not(.mini) .ef.tx { font-size: .92em; line-height: 1.15; color: #dfe5ee; }
+.card:not(.mini) .ab-p.ready { outline: 0; box-shadow: inset 0 0 0 1px var(--accent); }
+.card.has-undo:not(.mini) .c-head { padding-left: .2em; }
+.card.has-undo:not(.mini) .c-badge { visibility: hidden; }
+.card.lg { border-width: 8px; }
+.card.f-diamond:not(.mini) { border-color: transparent; background: linear-gradient(#07090e, #07090e) padding-box, linear-gradient(120deg, #7fe9ff, #f3c6ff, #fff6c8, #8affd2, #7fe9ff) border-box; background-size: 100% 100%, 300% 300%; }
+.card:not(.mini) .c-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: .86em; line-height: 1.05; }
+.card:not(.mini) .c-head { min-height: 2.9em; }
+.tok { width: 2.35em; height: 2.35em; font-size: 1.12em; }
+.tok-draw { width: 1.8em; }
+.ab-a .tok, .ab-s .tok { width: 1.95em; height: 1.95em; font-size: 1em; }
+.ab-a .tok-draw, .ab-s .tok-draw { width: 1.5em; }
+.tok-cap { font-size: .78em; line-height: 1.1; color: #aeb7c6; margin-top: .1em; }
+.ab-a .tok-cap, .ab-s .tok-cap { display: none; }
+.card.sm .tok-cap { display: none; }
+.card:not(.mini) .c-name { font-size: .8em; hyphens: auto; -webkit-hyphens: auto; overflow-wrap: anywhere; }
+.card:not(.mini) .c-badge { width: 1.95em; height: 1.95em; }
+.card:not(.mini) .c-artwrap { height: 41%; }
+.card:not(.mini) .ab-p { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.card:not(.mini) .ab-a, .card:not(.mini) .ab-s { flex: none; }
+.ab-p:has(.ef.tx) .tok-cap, .c-text:has(.ab-a):has(.ab-s) .tok-cap { display: none; }
+/* имя целиком: длинные — мельче, без многоточия */
+.card:not(.mini) .c-name { -webkit-line-clamp: 2; text-overflow: clip; overflow-wrap: normal; word-break: normal; hyphens: manual; }
+.card:not(.mini) .c-title.n-l .c-name { font-size: .72em; }
+.card:not(.mini) .c-title.n-xl .c-name { font-size: .64em; }
+.card:not(.mini) .c-sub { font-size: .58em; }
+/* текст не наезжает: блок свойств не сжимается, картинка уступает место на «текстовых» картах */
+.card:not(.mini) .ab-p { flex: 1 0 auto; }
+.card:not(.mini) .c-text { overflow: hidden; }
+.card.dense:not(.mini) .c-artwrap { height: 34%; }
+.card.dense2:not(.mini) .c-artwrap { height: 27%; }
+.card.dense2:not(.mini) .ab { font-size: .7em; }
+.card.dense2:not(.mini) .tok-cap { display: none; }
+.card:not(.mini) .ef.choose { font-size: .85em; line-height: 1.15; }
+.card:not(.mini) .ef.tx { font-size: .86em; }
+.card:not(.mini) .c-title.n-xxl .c-name { font-size: .56em; }
+.card:not(.mini) .c-title.n-x4 .c-name { font-size: .5em; }
+/* на маленьких картах подписи под значками прячем — значки говорят сами за себя */
+.card:not(.mini) { container-type: inline-size; }
+@container (max-width: 128px) { .tok-cap { display: none; } }
