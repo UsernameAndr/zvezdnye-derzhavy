@@ -11,6 +11,7 @@
     empire:  { name: 'Корона',         color: '#e4b42e', dark: '#4d3906', light: '#ffe7a0' },
     machine: { name: 'Машинный Орден', color: '#e04545', dark: '#4f1010', light: '#ffb0a8' },
     none:    { name: 'Нейтральная',    color: '#9aa6b8', dark: '#262d39', light: '#dfe6f0' },
+    diamond: { name: 'Бриллиантовая',  color: '#7fe9ff', dark: '#0b3442', light: '#eafdff' },
   };
 
   const CARDS = {};
@@ -42,7 +43,13 @@
    * {machineBase:1} возьмите карту, затем утилизируйте карту из руки
    * {brain:n}       утилизируйте до n карт из руки/сброса, возьмите столько же
    * {copy:1}        скопировать другой корабль, сыгранный в этот ход
-   * Пассивные свойства карты: fleetHQ (все корабли +1 урон), allAlly (союзник для всех фракций)
+   * {combatPerOpBase:n} +n урона за каждую базу соперников
+   * {nextToHand:1}  следующая купленная в этот ход карта идёт в руку
+   * {allOpDiscard:1} каждый соперник сбрасывает карту в начале своего хода
+   * {scrapForCombat:n} можно утилизировать карту из руки/сброса; если утилизировали — +n урона
+   * {destroyBaseMax:n} можно уничтожить базу соперника ценой до n
+   * Пассивные свойства карты: fleetHQ (все корабли +1 урон), allAlly (союзник для всех фракций),
+   * faction2 (карта считается ещё и второй фракцией)
    */
 
   // ── Стартовые и нейтральные ──
@@ -103,6 +110,36 @@
   B('m_junkyard',   'machine', 'Утилизатор',          6, 1, 5, true, [{ scrapHD: 1 }]);
   B('m_forge',      'machine', 'Кузница',             7, 1, 6, true, [{ machineBase: 1 }]);
   B('m_brain',      'machine', 'Ядро Разума',         8, 1, 6, true, [{ brain: 2 }]);
+
+  /* ── Новые карты (дополнение «Новые карты», включает хост) ── */
+  const NS = (...a) => { S(...a); CARDS[a[0]].exp = 'new'; };
+  const NB = (...a) => { B(...a); CARDS[a[0]].exp = 'new'; };
+  NS('b_spores',      'blob',    'Споровое облако',     3, 2, [{ combat: 4 }], [{ scrapRow: 1 }, { combat: 2 }]);
+  NB('b_parasite',    'blob',    'Гнездо-паразит',      4, 1, 4, false, [{ combat: 2 }], [{ combat: 2 }]);
+  NS('b_worldeater',  'blob',    'Пожиратель миров',    7, 1, [{ combat: 8 }, { combatPerOpBase: 2 }]);
+  NS('t_insurer',     'trade',   'Страховой агент',     2, 2, [{ trade: 2 }, { auth: 2 }]);
+  NB('t_bank',        'trade',   'Банк Лиги',           6, 1, 6, false, [{ choose: [[{ trade: 3 }], [{ auth: 5 }]] }], [{ draw: 1 }]);
+  NS('t_recruiter',   'trade',   'Вербовщик',           4, 1, [{ trade: 2 }, { nextToHand: 1 }]);
+  NS('e_censor',      'empire',  'Цензор',              5, 1, [{ combat: 5 }, { opDiscard: 1 }], [], [{ draw: 2 }]);
+  NB('e_academy',     'empire',  'Имперская академия',  5, 1, 5, true, [{ trade: 1 }], [{ draw: 1 }]);
+  NS('e_doubleagent', 'empire',  'Двойной агент',       3, 2, [{ combat: 3 }], [], [], { faction2: 'trade' });
+  NS('m_assembler',   'machine', 'Сборочный дрон',      3, 2, [{ combat: 2 }, { scrapHD: 1 }]);
+  NB('m_smelter',     'machine', 'Переплавка',          4, 1, 5, true, [{ scrapForCombat: 3 }]);
+  NS('n_boarder',     'none',    'Абордажный крейсер',  5, 1, [{ combat: 4 }, { destroyBaseMax: 4 }]);
+
+  /* ── Бриллиантовые карты (дополнение) ──
+   * Очень дорогие (12–18). В торговую колоду не входят: изредка сами появляются в ряду
+   * вместо обычной карты, в ряду — не больше одной; если её не купили за 3 круга, она исчезает.
+   * Считаются союзником для карт любой фракции.
+   */
+  const DS = (id, name, cost, primary) => add({ id, faction: 'diamond', name, cost, count: 1, rarity: 'diamond', primary, allAlly: true });
+  const DB = (id, name, cost, defense, outpost, primary) => add({ id, faction: 'diamond', name, cost, count: 1, rarity: 'diamond', type: 'base', defense, outpost, primary, allAlly: true });
+  DS('d_ark',         'Ковчег изобилия',      12, [{ trade: 8 }, { draw: 2 }]);
+  DB('d_eye',         'Око Галактики',        13, 10, false, [{ trade: 4 }, { draw: 1 }]);
+  DS('d_supernova',   'Сверхновая',           14, [{ combat: 14 }, { destroyBase: 1 }]);
+  DS('d_crown',       'Венец Вечности',       15, [{ auth: 10 }, { combat: 8 }, { allOpDiscard: 1 }]);
+  DB('d_citadel',     'Алмазная цитадель',    16, 15, true, [{ combat: 5 }, { auth: 3 }]);
+  DS('d_singularity', 'Сингулярность',        18, [{ combat: 10 }, { draw: 2 }, { brain: 3 }]);
 
   /* ── Герои (дополнение, включает хост) ──
    * Покупаются из торгового ряда, но не идут в колоду: герой сразу встаёт рядом с вами и остаётся,

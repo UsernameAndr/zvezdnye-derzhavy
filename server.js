@@ -225,7 +225,7 @@ const handlers = {
     const code = newCode();
     const room = {
       code, hostId: s.pid, members: [s.pid], game: null, chat: [], teams: { [s.pid]: 'A' },
-      settings: { authority: 50, maxPlayers: 4, randomOrder: true, mode: 'ffa', deckSize: 'auto', turnTime: 'off', heroes: true },
+      settings: { authority: 50, maxPlayers: 4, randomOrder: true, mode: 'ffa', deckSize: 'auto', turnTime: 'off', heroes: true, newCards: true, diamonds: true },
       lastActive: Date.now(),
     };
     rooms.set(code, room);
@@ -273,6 +273,8 @@ const handlers = {
       deckSize: ['auto', '1', '1.5', '2'].includes(String(st.deckSize)) ? String(st.deckSize) : room.settings.deckSize,
       turnTime: ['off', '60', '120'].includes(String(st.turnTime)) ? String(st.turnTime) : (room.settings.turnTime || 'off'),
       heroes: st.heroes === undefined ? room.settings.heroes !== false : !!st.heroes,
+      newCards: st.newCards === undefined ? room.settings.newCards !== false : !!st.newCards,
+      diamonds: st.diamonds === undefined ? room.settings.diamonds !== false : !!st.diamonds,
     };
     broadcastRoom(room);
     broadcastList();

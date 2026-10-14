@@ -306,6 +306,62 @@ t('герои: в колоде только если включены; наём,
   assert.ok(![...p.deck, ...p.discard, ...p.hand, ...p.inPlay].some((c) => c.uid === 'hx'));
 });
 
+t('новые карты: Пожиратель миров, Вербовщик, Двойной агент', () => {
+  const { g } = setup(2, ['b_worldeater', 't_recruiter', 'e_doubleagent']);
+  const p = g.pl('p0'), o = g.pl('p1');
+  o.bases.push({ uid: 'ob1', cid: 'b_hive' }, { uid: 'ob2', cid: 't_post' });
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });          // 8 урона + по 2 за каждую из 2 баз
+  assert.equal(g.pool.combat, 12);
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });          // Вербовщик: +2 денег, следующая покупка — в руку
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });          // Двойной агент
+  const agent = p.inPlay.find((c) => c.cid === 'e_doubleagent');
+  assert.ok(g.factions(agent).has('trade') && g.factions(agent).has('empire'));
+  g.row[0] = { uid: 'r0', cid: 'b_fighter' };
+  g.purse.p0 = 5;
+  g.act('p0', { type: 'buy', slot: 0 });
+  assert.ok(p.hand.some((c) => c.uid === 'r0'), 'куплено сразу в руку');
+  g.row[1] = { uid: 'r1', cid: 'b_fighter' };
+  g.act('p0', { type: 'buy', slot: 1 });
+  assert.ok(p.discard.some((c) => c.uid === 'r1'), 'вторая покупка — как обычно, в сброс');
+});
+
+t('Переплавка и Абордажный крейсер', () => {
+  const { g } = setup(2, ['n_boarder']);
+  const p = g.pl('p0'), o = g.pl('p1');
+  o.bases.push({ uid: 'cheap', cid: 't_post' }, { uid: 'pricey', cid: 'b_hive' });
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });
+  const pr = g.promptOf('p0');
+  assert.deepEqual(pr.cards.map((c) => c.uid), ['cheap']);  // только база ценой до 4
+  g.act('p0', { type: 'answer', uids: ['cheap'] });
+  assert.equal(o.bases.length, 1);
+  p.bases.push({ uid: 'sm', cid: 'm_smelter', used: {} });
+  p.discard.push({ uid: 'junk', cid: 'scout' });
+  const c0 = g.pool.combat;
+  g.act('p0', { type: 'activate', uid: 'sm' });
+  g.act('p0', { type: 'answer', uids: ['junk'] });
+  assert.equal(g.pool.combat, c0 + 3);
+  assert.ok(!p.discard.some((c) => c.uid === 'junk'));
+});
+
+t('бриллиантовые карты: появляются в ряду не больше одной и исчезают через 3 круга', () => {
+  const g = new Game([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], { authority: 50, diamonds: true, randomOrder: false });
+  assert.equal(g.diamonds.length, 6);
+  assert.ok(!g.tradeDeck.some((c) => c.cid.startsWith('d_')));
+  const rnd = Math.random;
+  Math.random = () => 0;           // шанс сработает всегда
+  try {
+    g.refillRow(0); g.refillRow(1);
+    const ds = g.row.filter((c) => c && c.cid.startsWith('d_'));
+    assert.equal(ds.length, 1, 'в ряду не больше одной');
+    const exp = ds[0].expires;
+    assert.equal(exp, g.turnNo + 6);
+    Math.random = rnd;
+    while (g.turnNo < exp) { g.pool.combat = 0; g.act(g.active()[0].id, { type: 'endTurn' }); }
+    assert.equal(g.row.filter((c) => c && c.cid.startsWith('d_')).length, 0, 'исчезла');
+    assert.equal(g.diamonds.length, 6, 'вернулась в запас');
+  } finally { Math.random = rnd; }
+});
+
 t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
   const g = teams();
   const t0 = g.turnNo;
@@ -338,7 +394,7 @@ t('2×2: вернуть карту нельзя, если после неё иг
 });
 
 t('размер торговой колоды: 80 / 1.5× / 2× и авто', () => {
-  const mk = (n, deckSize) => new Game(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'x' })), { deckSize });
+  const mk = (n, deckSize) => new Game(Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: 'x' })), { deckSize, newCards: false });
   const total = (g) => g.tradeDeck.length + g.row.filter(Boolean).length;
   assert.equal(total(mk(2, '1')), 80);
   assert.equal(total(mk(2, '2')), 160);
@@ -346,6 +402,7 @@ t('размер торговой колоды: 80 / 1.5× / 2× и авто', ()
   assert.equal(total(mk(2, 'auto')), 80);
   assert.equal(total(mk(6, 'auto')), 160);
   assert.equal(mk(6, 'auto').explorers, 20);
+  assert.equal(total(new Game([{ id: 'a', name: 'a' }, { id: 'b', name: 'b' }], { deckSize: '1' })), 96); // с новыми картами
 });
 
 t('своя колода видна без порядка, чужая — нет', () => {

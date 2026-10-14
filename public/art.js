@@ -20,8 +20,8 @@
   const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
   const mix = (a, b, t) => { const A = rgb(a), B = rgb(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
 
-  const SECOND = { blob: '#1d6f7a', trade: '#5b3a9c', empire: '#9c3b24', machine: '#4a2a7a', none: '#2f4566' };
-  const METAL = { blob: '#6f8f63', trade: '#8e9db3', empire: '#a39a86', machine: '#8f8a8a', none: '#9aa3b0' };
+  const SECOND = { blob: '#1d6f7a', trade: '#5b3a9c', empire: '#9c3b24', machine: '#4a2a7a', none: '#2f4566', diamond: '#6a3fa8' };
+  const METAL = { blob: '#6f8f63', trade: '#8e9db3', empire: '#a39a86', machine: '#8f8a8a', none: '#9aa3b0', diamond: '#cfeff8' };
 
   function nebula(id, seed, freq, color, s) {
     const [R, G, B] = rgb(color).map((v) => (v / 255).toFixed(3));
@@ -393,6 +393,40 @@
     return g;
   }
 
+  // ── бриллиантовые карты: гранёный кристалл (корабль) или кристаллическая станция ──
+  function gem(cx, cy, w, h, a, b) {
+    const top = cy - h * 0.3, bot = cy + h * 0.7;
+    const L = cx - w / 2, R = cx + w / 2;
+    let g = `<path d="M${n(L)} ${n(top)} L${n(cx - w * 0.25)} ${n(cy - h * 0.62)} L${n(cx + w * 0.25)} ${n(cy - h * 0.62)} L${n(R)} ${n(top)} L${n(cx)} ${n(bot)} Z" fill="${a}"/>`;
+    g += `<path d="M${n(L)} ${n(top)} L${n(cx)} ${n(bot)} L${n(cx - w * 0.18)} ${n(top)} Z" fill="#ffffff" opacity=".35"/>`;
+    g += `<path d="M${n(R)} ${n(top)} L${n(cx)} ${n(bot)} L${n(cx + w * 0.18)} ${n(top)} Z" fill="${b}" opacity=".7"/>`;
+    g += `<path d="M${n(cx - w * 0.25)} ${n(cy - h * 0.62)} L${n(cx - w * 0.18)} ${n(top)} L${n(cx)} ${n(cy - h * 0.62)} L${n(cx + w * 0.18)} ${n(top)} L${n(cx + w * 0.25)} ${n(cy - h * 0.62)}" fill="none" stroke="#fff" stroke-width="1" opacity=".7"/>`;
+    g += `<path d="M${n(L)} ${n(top)} H${n(R)}" stroke="#fff" stroke-width="1.2" opacity=".8"/>`;
+    return g;
+  }
+  function diamondArt(r, d) {
+    const hue = ['#7fe9ff', '#d7a8ff', '#8affd2', '#ffd98a', '#ff9ad5', '#9fb8ff'][hash(d.id) % 6];
+    let g = `<circle cx="150" cy="92" r="80" fill="url(#glow)" opacity=".55"/>`;
+    // лучи
+    for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + r(); g += `<path d="M150 92 L${n(150 + Math.cos(a) * 160)} ${n(92 + Math.sin(a) * 160)}" stroke="${hue}" stroke-width="${n(0.6 + r() * 1.4)}" opacity=".25"/>`; }
+    if (d.type === 'base') {
+      // кристаллическая станция: кольцо и сросток кристаллов
+      g += `<ellipse cx="150" cy="118" rx="96" ry="16" fill="none" stroke="${hue}" stroke-width="3" opacity=".8"/>`;
+      g += gem(118, 102, 34, 70, mix(hue, '#ffffff', 0.25), mix(hue, '#000000', 0.45));
+      g += gem(182, 104, 34, 66, mix(hue, '#ffffff', 0.25), mix(hue, '#000000', 0.45));
+      g += gem(150, 92, 52, 104, mix(hue, '#ffffff', 0.4), mix(hue, '#000000', 0.35));
+      g += `<ellipse cx="150" cy="118" rx="96" ry="16" fill="none" stroke="#fff" stroke-width="1" opacity=".5" stroke-dasharray="120 400"/>`;
+    } else {
+      // кристалл-корабль: гранёный корпус и сияющий след
+      g += `<g transform="rotate(-90 150 92)">${gem(150, 92, 60, 120, mix(hue, '#ffffff', 0.35), mix(hue, '#000000', 0.4))}</g>`;
+      g += `<ellipse cx="60" cy="92" rx="60" ry="7" fill="url(#plume)" opacity=".9"/>`;
+      g += `<path d="M150 70 L120 40 L132 74 Z M150 114 L120 144 L132 110 Z" fill="${mix(hue, '#ffffff', 0.2)}" opacity=".85"/>`;
+    }
+    // блики-звёзды
+    for (let i = 0; i < 4; i++) { const x = 100 + r() * 100, y = 50 + r() * 80, k = 3 + r() * 4; g += `<path d="M${n(x - k * 2)} ${n(y)}H${n(x + k * 2)}M${n(x)} ${n(y - k * 2)}V${n(y + k * 2)}" stroke="#fff" stroke-width="1" opacity=".9"/>`; }
+    return g;
+  }
+
   function svg(cid) {
     const d = window.CARDS[cid];
     const f = d.faction, F = window.FACTIONS[f];
@@ -403,7 +437,8 @@
     defs += nebula('n2', Math.floor(r() * 999), (0.01 + r() * 0.008).toFixed(4), SECOND[f], 0.45 + r() * 0.15);
     defs += objDefs(F, f);
     let body = `<rect width="${W}" height="${H}" fill="#02030a"/><rect width="${W}" height="${H}" filter="url(#n2)"/><rect width="${W}" height="${H}" filter="url(#n1)"/>` + stars(r);
-    if (d.type === 'hero') body += portrait(r, F, f, d);
+    if (d.rarity === 'diamond') body += diamondArt(r, d);
+    else if (d.type === 'hero') body += portrait(r, F, f, d);
     else if (d.type === 'base') {
       if (!d.outpost) body += planet(r, F, f);
       else if (f === 'empire') body += hash(cid) % 2 ? citadel(r, F) : station(r, F);

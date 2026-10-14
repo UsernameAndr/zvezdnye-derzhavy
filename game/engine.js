@@ -28,7 +28,7 @@ class GameError extends Error {}
 const fail = (msg) => { throw new GameError(msg); };
 
 // Эффекты, которые база выполняет сама в начале хода владельца (не требуют решений о моменте)
-const AUTO_KEYS = new Set(['trade', 'combat', 'auth', 'draw', 'topNext', 'opDiscard']);
+const AUTO_KEYS = new Set(['trade', 'combat', 'auth', 'draw', 'topNext', 'opDiscard', 'allOpDiscard', 'combatPerOpBase']);
 const isAuto = (effects) => effects.every((e) => AUTO_KEYS.has(Object.keys(e)[0]));
 
 function plural(n, one, few, many) {
@@ -46,9 +46,16 @@ function deckMult(setting, nPlayers) {
   return [1, 1.5, 2].includes(m) ? m : 1;
 }
 // Состав торговой колоды: целые копии набора + для «полуторной» — по половине карт каждой фракции
-function buildTradeDeck(mult, heroes) {
+// opts: { heroes, newCards } — какие дополнения включены
+function buildTradeDeck(mult, opts = {}) {
+  if (typeof opts === 'boolean') opts = { heroes: opts };
+  const heroes = !!opts.heroes;
   const set = [];
-  for (const c of Object.values(CARDS)) if (c.type !== 'hero') for (let i = 0; i < c.count; i++) set.push(c.id);
+  for (const c of Object.values(CARDS)) {
+    if (c.type === 'hero' || c.rarity === 'diamond') continue;
+    if (c.exp === 'new' && opts.newCards === false) continue;
+    for (let i = 0; i < c.count; i++) set.push(c.id);
+  }
   const out = [];
   for (let k = 0; k < Math.floor(mult); k++) out.push(...set);
   if (mult % 1) {
@@ -60,7 +67,10 @@ function buildTradeDeck(mult, heroes) {
   if (heroes) for (const c of Object.values(CARDS)) if (c.type === 'hero') out.push(c.id);
   return out;
 }
-function tradeDeckSize(mult, heroes) { return buildTradeDeck(mult, heroes).length; }
+function tradeDeckSize(mult, opts) { return buildTradeDeck(mult, opts).length; }
+// бриллиантовые карты: шанс появиться при каждом пополнении ряда и сколько кругов лежат
+const DIAMOND_CHANCE = 0.05;
+const DIAMOND_ROUNDS = 3;
 
 class Game {
   constructor(players, settings) {
@@ -80,8 +90,10 @@ class Game {
     const mult = deckMult(this.settings.deckSize, this.players.length);
     this.deckMult = mult;
     this.tradeDeck = [];
-    for (const id of buildTradeDeck(mult, !!this.settings.heroes)) this.tradeDeck.push(mk(id));
+    for (const id of buildTradeDeck(mult, this.deckOpts())) this.tradeDeck.push(mk(id));
     shuffle(this.tradeDeck);
+    // бриллиантовые карты лежат отдельно и изредка сами появляются в ряду
+    this.diamonds = this.settings.diamonds ? shuffle(Object.values(CARDS).filter((c) => c.rarity === 'diamond').map((c) => mk(c.id))) : [];
     this.row = [];
     for (let i = 0; i < 5; i++) this.row.push(this.tradeDeck.pop() || null);
     this.explorers = Math.round(10 * mult);
@@ -94,6 +106,7 @@ class Game {
     this.topNext = 0;
     this.purse = {};     // деньги каждого игрока в этот ход
     this.topNextBy = {}; // «следующий корабль — на верх колоды» у каждого игрока
+    this.toHandBy = {};  // «следующая купленная карта — в руку» у каждого игрока
     this.queues = {};   // очередь эффектов у каждого игрока
     this.turnStats = { buys: {}, dmg: {}, killed: [] }; // что произошло за текущий ход (для короткой сводки)
     this.history = [];  // сводки прошлых ходов
@@ -135,6 +148,8 @@ class Game {
   clearChoices(pid) { delete this.prompts[pid]; delete this.queues[pid]; }
   findCard(uid) { for (const p of this.players) for (const c of [...p.inPlay, ...p.bases]) if (c.uid === uid) return c; return null; }
 
+  deckOpts() { return { heroes: !!this.settings.heroes, newCards: this.settings.newCards !== false }; }
+
   // ── утилиты ──
   addLog(text, kind = '') { this.log.push({ text, kind, t: Date.now() }); if (this.log.length > 300) this.log.shift(); }
   pl(id) { return this.players.find((p) => p.id === id); }
@@ -158,6 +173,7 @@ class Game {
 
   factions(c) {
     const s = new Set([def(c).faction]);
+    if (def(c).faction2) s.add(def(c).faction2);
     if (c.copied) s.add(CARDS[c.cid].faction);
     s.delete('none');
     return s;
@@ -268,9 +284,33 @@ class Game {
         this.addLog(`Следующий купленный в этот ход корабль ляжет на верх колоды`);
         break;
       case 'freeShip': {
-        const cards = this.row.filter((c) => c && def(c).type === 'ship').map((c) => ({ ...clean(c), zone: 'row' }));
+        const cards = this.row.filter((c) => c && def(c).type === 'ship' && def(c).rarity !== 'diamond').map((c) => ({ ...clean(c), zone: 'row' }));
         if (this.explorers > 0) cards.push({ uid: 'explorer', cid: 'explorer', zone: 'explorer' });
         if (cards.length) this.setPrompt({ kind: 'pick', purpose: 'freeShip', min: 0, max: 1, cards, text: `${srcName}: возьмите любой корабль бесплатно — он ляжет на верх колоды` }, src);
+        break;
+      }
+      case 'combatPerOpBase': {
+        const n = this.opponents(p).reduce((a, o) => a + o.bases.length, 0) * v;
+        if (n) { this.pool.combat += n; this.addLog(`${p.name}: +${n} урона за базы соперников`); }
+        break;
+      }
+      case 'nextToHand':
+        this.toHandBy[p.id] = (this.toHandBy[p.id] || 0) + v;
+        this.addLog(`Следующая карта, купленная ${p.name} в этот ход, сразу пойдёт в руку`);
+        break;
+      case 'allOpDiscard':
+        for (const o of this.opponents(p)) o.pendingDiscard += v;
+        this.addLog(`Каждый соперник сбросит карту в начале своего хода`, 'warn');
+        break;
+      case 'scrapForCombat': {
+        const cards = [...p.hand.map((c) => ({ ...clean(c), zone: 'hand' })), ...p.discard.map((c) => ({ ...clean(c), zone: 'discard' }))];
+        if (cards.length) this.setPrompt({ kind: 'pick', purpose: 'scrapForCombat', bonus: v, min: 0, max: 1, cards, text: `${srcName}: утилизируйте карту из руки или сброса — получите +${v} урона` }, src);
+        break;
+      }
+      case 'destroyBaseMax': {
+        const cards = [];
+        for (const o of this.opponents(p)) for (const b of o.bases) if (def(b).cost <= v) cards.push({ ...clean(b), zone: 'base', owner: o.id });
+        if (cards.length) this.setPrompt({ kind: 'pick', purpose: 'destroyBase', min: 0, max: 1, cards, text: `${srcName}: можете уничтожить базу соперника ценой до ${v}` }, src);
         break;
       }
       case 'yacht':
@@ -317,7 +357,18 @@ class Game {
     return null;
   }
 
-  refillRow(i) { this.row[i] = this.tradeDeck.pop() || null; this.revealSeq++; }
+  refillRow(i) {
+    this.revealSeq++;
+    const hasDiamond = this.row.some((c, k) => k !== i && c && def(c).rarity === 'diamond');
+    if (this.diamonds && this.diamonds.length && !hasDiamond && Math.random() < DIAMOND_CHANCE) {
+      const d = this.diamonds.pop();
+      d.expires = this.turnNo + DIAMOND_ROUNDS * this.teamOrder.filter((t) => this.teamAlive(t)).length;
+      this.row[i] = d;
+      this.addLog(`💎 В торговом ряду появилась бриллиантовая карта «${def(d).name}»!`, 'win');
+      return;
+    }
+    this.row[i] = this.tradeDeck.pop() || null;
+  }
 
   handlePick(pr, uids, srcRef) {
     const p = this.pl(pr.pid);
@@ -331,7 +382,7 @@ class Game {
           this.refillRow(i);
         }
         break;
-      case 'scrapHD': case 'scrapHand': case 'brain': {
+      case 'scrapHD': case 'scrapHand': case 'brain': case 'scrapForCombat': {
         let n = 0;
         for (const uid of uids) {
           const r = this.removeFromHandOrDiscard(p, uid);
@@ -341,6 +392,7 @@ class Game {
           this.addLog(`${p.name} утилизирует «${def(r.card).name}» из ${r.zone}`, 'scrap');
         }
         if (pr.purpose === 'brain' && n) { const g = this.draw(p, n); this.addLog(`${p.name} берёт ${cardsWord(g)}`); }
+        if (pr.purpose === 'scrapForCombat' && n) { this.pool.combat += pr.bonus; this.addLog(`${p.name}: +${pr.bonus} урона за переплавку`); }
         break;
       }
       case 'destroyBase':
@@ -406,8 +458,17 @@ class Game {
     this.topNext = 0;
     this.purse = {};
     this.topNextBy = {};
+    this.toHandBy = {};
     this.ready = {};
     this.undoStack = [];
+    // бриллиантовую карту, которую никто не купил за несколько кругов, уносит из ряда
+    this.row.forEach((c, i) => {
+      if (c && def(c).rarity === 'diamond' && c.expires && c.expires <= this.turnNo) {
+        this.diamonds.push(clean(c)); shuffle(this.diamonds);
+        this.row[i] = this.tradeDeck.pop() || null;
+        this.addLog(`💎 «${def(c).name}» исчезает из торгового ряда`, 'sys');
+      }
+    });
     this.queues = {};
     this.prompts = {};
     this.turnStats = { buys: {}, dmg: {}, killed: [] };
@@ -599,7 +660,7 @@ class Game {
   snapshot(uid, pid) {
     return {
       uid, pid, revealSeq: this.revealSeq, logLen: this.log.length,
-      data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext, purse: this.purse, topNextBy: this.topNextBy, turnStats: this.turnStats })),
+      data: JSON.parse(JSON.stringify({ players: this.players, row: this.row, tradeDeck: this.tradeDeck, explorers: this.explorers, pool: this.pool, topNext: this.topNext, purse: this.purse, topNextBy: this.topNextBy, toHandBy: this.toHandBy, turnStats: this.turnStats, diamonds: this.diamonds })),
     };
   }
 
@@ -673,6 +734,10 @@ class Game {
       // герой не идёт в колоду: встаёт рядом с игроком и сразу считается союзником своей фракции
       p.heroes.push({ ...clean(card), boughtTurn: this.turnNo });
       this.addLog(`${p.name} нанимает героя «${d.name}»`, 'buy');
+    } else if ((this.toHandBy[p.id] || 0) > 0) {
+      this.toHandBy[p.id]--;
+      p.hand.push(clean(card));
+      this.addLog(`${p.name} покупает «${d.name}» → сразу в руку`, 'buy');
     } else if (d.type === 'ship' && (this.topNextBy[p.id] || 0) > 0) {
       this.topNextBy[p.id]--;
       this.topNext--;
@@ -803,9 +868,10 @@ class Game {
         // своя колода — без порядка (отсортирована), чтобы не было спойлера
         deckList: p.id === pid ? p.deck.map((c) => c.cid).sort() : null,
       })),
-      row: this.row.map((c) => (c ? pub(c) : null)),
+      row: this.row.map((c) => (c ? (c.expires ? { ...pub(c), expires: c.expires } : pub(c)) : null)),
       tradeDeckCount: this.tradeDeck.length,
-      tradeDeckTotal: tradeDeckSize(this.deckMult, !!this.settings.heroes),
+      tradeDeckTotal: tradeDeckSize(this.deckMult, this.deckOpts()),
+      toHand: this.toHandBy[pid] || 0,
       explorers: this.explorers,
       active: active.map((p) => p.id),
       turn: active[0] ? active[0].id : null,

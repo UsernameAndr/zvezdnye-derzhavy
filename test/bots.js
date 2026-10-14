@@ -28,7 +28,7 @@ function randomMove(g, pid) {
 let illegal = 0, stuck = 0, games = 0, botWins = 0, vsRandom = 0;
 function run(n, mode, botIds, opts = {}) {
   const players = Array.from({ length: n }, (_, k) => ({ id: 'p' + k, name: 'P' + k, team: k % 2 ? 'B' : 'A' }));
-  const g = new Game(players, { authority: 50, mode, randomOrder: true, heroes: Math.random() < 0.5 });
+  const g = new Game(players, { authority: 50, mode, randomOrder: true, heroes: Math.random() < 0.5, diamonds: Math.random() < 0.7 });
   let steps = 0, idle = 0;
   while (!g.over && steps < 6000) {
     steps++;

@@ -20,7 +20,8 @@ const def = (c) => CARDS[c.copied || c.cid];
 const val = (e) => {
   const k = Object.keys(e)[0], v = e[k];
   return { trade: v, combat: v, auth: v * 0.6, draw: v * 1.6, opDiscard: 0.8, scrapRow: 0.3, scrapHD: 0.6,
-    destroyBase: 1.5, topNext: 0.6, freeShip: 3, yacht: 1, blobDraw: 1.5, recycle: 0.8, machineBase: 1.2, brain: 1.5, copy: 2 }[k] || 0;
+    destroyBase: 1.5, topNext: 0.6, freeShip: 3, yacht: 1, blobDraw: 1.5, recycle: 0.8, machineBase: 1.2, brain: 1.5, copy: 2,
+    combatPerOpBase: 2, nextToHand: 1.5, allOpDiscard: 1.2, scrapForCombat: 2.5, destroyBaseMax: 1.2 }[k] || 0;
 };
 const effVal = (list) => list.reduce((s, e) => s + (Object.keys(e)[0] === 'choose' ? Math.max(...e.choose.map(effVal)) : val(e)), 0);
 
@@ -143,6 +144,12 @@ function answerPrompt(g, p, pr) {
       // убрать из ряда самую ценную карту, которую мы сейчас не купим (чтобы не досталась соперникам)
       const c = cards.slice().sort((a, b) => CARDS[b.cid].cost - CARDS[a.cid].cost)[0];
       if (c && CARDS[c.cid].cost >= 5 && CARDS[c.cid].cost > g.tradeOf(p.id)) pick = [c.uid];
+      break;
+    }
+    case 'scrapForCombat': {
+      // ради урона не жалко и Старателя
+      const c = cards.slice().sort((a, b) => junkScore(b.cid) - junkScore(a.cid))[0];
+      if (c && junkScore(c.cid) >= (deckSize(p) >= 12 ? 1 : 2)) pick = [c.uid];
       break;
     }
     case 'scrapHD': case 'brain': {

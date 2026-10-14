@@ -87,6 +87,7 @@
     empire: '<path d="M10 1.2l2.5 5.6 6.1.6-4.6 4.1 1.3 6-5.3-3.1-5.3 3.1 1.3-6L1.4 7.4l6.1-.6z"/>',
     machine: '<path d="M8.6 1h2.8l.5 2.4 1.6.7 2.1-1.3 2 2-1.3 2.1.7 1.6 2.4.5v2.8l-2.4.5-.7 1.6 1.3 2.1-2 2-2.1-1.3-1.6.7-.5 2.4H8.6l-.5-2.4-1.6-.7-2.1 1.3-2-2 1.3-2.1-.7-1.6L1 11.4V8.6l2.4-.5.7-1.6-1.3-2.1 2-2 2.1 1.3 1.6-.7z"/><circle cx="10" cy="10" r="3.2" fill="#0b0e14"/>',
     none: '<circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="10" r="2.5"/>',
+    diamond: '<path d="M5 2h10l4 5-9 11L1 7z"/><path d="M1 7h18M7 2l3 5 3-5M10 7v11" fill="none" stroke="#0b0e14" stroke-width="1"/>',
   };
   const emblem = (f) => `<svg class="emb" viewBox="0 0 20 20" style="color:${FACTIONS[f].color};fill:${FACTIONS[f].color}">${EMB[f]}</svg>`;
   const TRASH = '<svg class="emb" viewBox="0 0 20 20" fill="currentColor"><path d="M7 2h6l1 2h4v2H2V4h4zM4 7h12l-1 11H5z"/></svg>';
@@ -119,8 +120,13 @@
       blobDraw: 'Карта за каждую карту Роя',
       recycle: 'Сбросить до 2 карт и взять столько же',
       machineBase: 'Взять карту, затем утилизировать карту из руки',
-      brain: 'Утилизировать до 2 карт, взять столько же',
+      brain: `Утилизировать до ${v} карт, взять столько же`,
       copy: 'Повторяет другой ваш корабль',
+      combatPerOpBase: `+${v} урона за каждую базу соперников`,
+      nextToHand: 'Следующая покупка — сразу в руку',
+      allOpDiscard: 'Каждый соперник сбрасывает карту',
+      scrapForCombat: `Утилизировать карту из руки/сброса → +${v} урона`,
+      destroyBaseMax: `Можно уничтожить базу ценой до ${v}`,
       choose: '',
     }[k] || (k === 'choose' ? v.map((o) => o.map(effPlain).join(', ')).join(' или ') : '');
   }
@@ -143,7 +149,12 @@
       blobDraw: 'Возьмите по карте за каждую карту Роя, сыгранную в этот ход.',
       recycle: 'Сбросьте до двух карт из руки и возьмите столько же новых.',
       machineBase: 'Возьмите карту, затем обязательно утилизируйте одну карту из руки.',
-      brain: 'Утилизируйте до двух карт из руки или сброса и возьмите столько же новых.',
+      brain: `Утилизируйте до ${cardsWord(v)} из руки или сброса и возьмите столько же новых.`,
+      combatPerOpBase: `Дополнительно +${v} урона за каждую базу и аванпост, которые сейчас стоят у ваших соперников.`,
+      nextToHand: 'Следующая карта, которую вы купите в этот ход, ляжет сразу в руку — её можно сыграть в этот же ход.',
+      allOpDiscard: 'Каждый соперник сбросит одну карту из руки в начале своего хода.',
+      scrapForCombat: `Можно навсегда убрать из игры карту из руки или сброса. Если убрали — получите +${v} урона.`,
+      destroyBaseMax: `Можно уничтожить одну базу соперника ценой не больше ${v}, даже аванпост, не тратя урон.`,
       copy: 'Выберите другой ваш корабль, сыгранный в этот ход: эта карта повторит его действие и станет той же фракции.',
     }[k] || (k === 'choose' ? 'Выберите одно: ' + v.map((o) => o.map(effPlain).join(', ')).join(' или ') + '.' : '');
   }
@@ -211,11 +222,11 @@
     const hero = d.type === 'hero';
     if (hero) prim = `<span class="ef tx">${d.faction !== 'none' ? `Пока рядом — союзник: ${F.name}` : 'Нейтральный герой'}</span>`;
     if (d.fleetHQ) prim += `<span class="ef tx">Все ваши корабли получают +1 урона</span>`;
-    if (d.allAlly) prim += `<span class="ef tx">Считается союзником для карт любой фракции</span>`;
+    if (d.allAlly) prim += `<span class="ef tx">${d.rarity === 'diamond' ? 'Союзник любой фракции' : 'Считается союзником для карт любой фракции'}</span>`;
     return `<div class="${cls}" ${attrs} style="${style}">
       <div class="c-head"><span class="c-name">${esc(d.name)}</span>${d.cost ? `<span class="c-cost">${d.cost}</span>` : ''}</div>
       <div class="c-artwrap">${art}${c.copied ? '<span class="c-copy">копия · Мимикр</span>' : ''}</div>
-      <div class="c-type">${emblem(d.faction)}<span class="tn">${typeName(d)}${d.faction !== 'none' ? ` · ${F.name}` : ''}</span>${defBadge}</div>
+      <div class="c-type">${emblem(d.faction)}${d.faction2 ? emblem(d.faction2) : ''}<span class="tn">${typeName(d)}${d.faction !== 'none' ? ` · ${F.name}${d.faction2 ? ` + ${FACTIONS[d.faction2].name}` : ''}` : ''}</span>${defBadge}</div>
       <div class="c-text">
         ${prim ? `<div class="ab ab-p ${o.manual && base && d.primary.length && !used.primary ? 'ready' : ''}">${prim}</div>` : ''}
         ${d.ally.length ? `<div class="ab ab-a ${used.ally ? 'done' : ''}"><span class="lbl">${emblem(d.faction)}Союз</span>${abil(d.ally)}</div>` : ''}
@@ -231,11 +242,13 @@
     const d = CARDS[cid], F = FACTIONS[d.faction];
     const list = (arr) => `<ul>${arr.map((e) => `<li>${effLong(e)}</li>`).join('')}</ul>`;
     let info = `<div class="d-title">${esc(d.name)}</div>
-      <div class="d-sub">${emblem(d.faction)} ${typeName(d)}${d.faction !== 'none' ? ' · ' + F.name : ''}${d.cost ? ` · цена ${d.cost}` : ''}${d.type === 'base' ? ` · защита ${d.defense}` : ''}</div>
+      <div class="d-sub">${emblem(d.faction)}${d.faction2 ? emblem(d.faction2) : ''} ${typeName(d)}${d.faction !== 'none' ? ' · ' + F.name + (d.faction2 ? ' + ' + FACTIONS[d.faction2].name : '') : ''}${d.cost ? ` · цена ${d.cost}` : ''}${d.type === 'base' ? ` · защита ${d.defense}` : ''}</div>
       <p class="d-type">${typeExplain(d)}</p>`;
     if (d.primary.length) info += `<h5>${d.type === 'base' ? 'Каждый ваш ход' : 'Когда разыграна'}</h5>${list(d.primary)}`;
     if (d.fleetHQ) info += `<h5>Постоянно</h5><ul><li>Каждый корабль, который вы играете, даёт дополнительно +1 урона.</li></ul>`;
-    if (d.allAlly) info += `<h5>Постоянно</h5><ul><li>Пока эта база в игре, у всех ваших карт срабатывают союзные способности.</li></ul>`;
+    if (d.rarity === 'diamond') info += `<h5>💎 Бриллиантовая карта</h5><p class="muted">Редкая и очень дорогая. Появляется в торговом ряду сама и ненадолго: если её не купят за 3 круга, она исчезнет. Считается союзником для карт любой фракции.</p>`;
+    else if (d.allAlly) info += `<h5>Постоянно</h5><ul><li>Пока эта база в игре, у всех ваших карт срабатывают союзные способности.</li></ul>`;
+    if (d.faction2) info += `<h5>Две фракции</h5><p class="muted">Карта считается и «${F.name}», и «${FACTIONS[d.faction2].name}»: она союзник для карт обеих фракций.</p>`;
     if (d.ally.length) info += `<h5>${emblem(d.faction)} Союзная способность</h5><p class="muted">Срабатывает, если в этот ход у вас в игре есть ещё одна карта фракции «${F.name}» (корабль или база).</p>${list(d.ally)}`;
     if (d.type === 'hero') info += `<h5>⚔ Отправить в бой</h5><p class="muted">В свой ход, кнопкой «В бой»: герой уходит из игры, а вы получаете эффект.</p>${list(d.scrap)}`;
     else if (d.scrap.length) info += `<h5>${TRASH} Утилизация</h5><p class="muted">Кнопкой «Утилизировать»: карта навсегда уходит из игры, а вы получаете эффект.</p>${list(d.scrap)}`;
@@ -288,6 +301,7 @@
       <p>У каждого колода из 10 карт: 8 «Курьеров» (+1 к деньгам) и 2 «Перехватчика» (+1 урона). Первый игрок начинает с 3 картами, второй — с 5 (в игре на троих и больше: 3, 4, затем по 5). Когда колода кончается, сброс перемешивается в новую колоду.</p>
       <p><b>Передумали?</b> На сыгранной карте есть крестик — он возвращает её в руку. Вернуть карту можно, пока вы ничего не купили и не атаковали и пока эта карта не дала взять новые карты (их уже видно).</p>
       <p><b>Корабли</b> действуют один ход и уходят в сброс. <b>Базы</b> остаются на столе и действуют каждый ваш ход; простые эффекты баз срабатывают сами, а если нужно выбирать — нажмите «Использовать». Чтобы уничтожить базу, потратьте урон, равный её защите (число в щите). Тёмный щит — <b>аванпост</b>: он защищает владельца и его остальные базы.</p>
+      <p>💎 <b>Бриллиантовые карты</b> (если хост их включил) — редкие и очень дорогие, 12–18. Они не лежат в торговой колоде, а изредка сами появляются в ряду вместо обычной карты; в ряду может быть только одна. Если её не купят за 3 круга, она исчезнет. Бриллиантовые карты — союзники для любой фракции.</p>
       <p><b>Герои</b> (если хост их включил) покупаются из торгового ряда, но не идут в колоду: герой сразу встаёт рядом с вами. Пока он рядом, он союзник своей фракции — у ваших карт этой фракции срабатывают союзные способности. В любой момент своего хода героя можно отправить в бой: получите его эффект, а герой уйдёт из игры.</p>
       <h4>Фракции</h4>
       <div class="fac-list">
@@ -422,6 +436,9 @@
           ${host ? `<label class="custom">Своё значение <input id="l-auth" type="number" min="1" max="999" value="${st.authority}"></label>` : ''}
         </div>
         ${teamsMode ? '' : `<div class="set"><div class="set-l">Мест за столом</div><div class="segs">${chips('maxPlayers', [2, 3, 4, 5, 6], st.maxPlayers)}</div></div>`}
+        <div class="set"><div class="set-l">Новые карты</div><div class="segs">${chips('newCards', [true, false], st.newCards !== false, (v) => (v ? 'Добавить 16 карт' : 'Только базовые'))}</div></div>
+        <div class="set"><div class="set-l">Бриллиантовые карты</div><div class="segs">${chips('diamonds', [true, false], st.diamonds !== false, (v) => (v ? 'Есть' : 'Нет'))}</div>
+          ${st.diamonds !== false ? '<p class="muted small set-note">Очень дорогие (12–18) и сильные карты. Изредка сами появляются в торговом ряду — не больше одной сразу — и исчезают, если их не купят за 3 круга.</p>' : ''}</div>
         <div class="set"><div class="set-l">Дополнение «Герои»</div><div class="segs">${chips('heroes', [true, false], st.heroes !== false, (v) => (v ? 'С героями' : 'Без героев'))}</div>
           ${st.heroes !== false ? '<p class="muted small set-note">В торговую колоду добавляются 10 героев. Купленный герой встаёт рядом с игроком, считается союзником своей фракции, а в нужный момент его можно отправить в бой ради разового эффекта.</p>' : ''}</div>
         <div class="set"><div class="set-l">Торговая колода</div><div class="segs">${chips('deckSize', ['auto', '1', '1.5', '2'], String(st.deckSize || 'auto'), (v) => deckLbl[v])}</div>
@@ -661,7 +678,8 @@
     const rowHTML = g.row.map((c, i) => {
       if (!c) return `<div class="card ${cs} slot-empty"></div>`;
       const can = myTurn && !blocked && trade >= CARDS[c.cid].cost;
-      return cardHTML(c, { size: cs, cls: can ? 'can-buy' : '', attrs: `data-zone="row" data-slot="${i}" ${can && !isTouch ? 'data-act="buy"' : ''}` });
+      const left = c.expires ? Math.max(1, Math.ceil((c.expires - g.turnNo) / Math.max(1, g.players.filter((x) => x.alive).map((x) => x.team).filter((t, k, a) => a.indexOf(t) === k).length))) : 0;
+      return cardHTML(c, { size: cs, cls: can ? 'can-buy' : '', attrs: `data-zone="row" data-slot="${i}" ${can && !isTouch ? 'data-act="buy"' : ''}`, badge: c.expires ? `<span class="dia-left" title="Исчезнет, если не купить">💎 ${left} ${plural(left, 'круг', 'круга', 'кругов')}</span>` : '' });
     }).join('');
     const canExp = myTurn && !blocked && trade >= 2 && g.explorers > 0;
     const expHTML = g.explorers > 0
@@ -747,7 +765,7 @@
       ${mqWide.matches ? `<section class="opps-area"><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}${mateHTML}</div></section>` : ''}
       </div>
       <div class="table-row"><section class="zone play-zone" style="--pc:${colorOf(cur.id)}">
-        <div class="zl">${isMe ? (teams ? 'Сыграно вашей командой' : 'Вы сыграли') : `Сыграно: ${C.curName}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}</div>
+        <div class="zl">${isMe ? (teams ? 'Сыграно вашей командой' : 'Вы сыграли') : `Сыграно: ${C.curName}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}${g.toHand ? ' <span class="tag-s">следующая покупка — в руку</span>' : ''}</div>
         <div class="strip">${playHTML || '<span class="none">Пока ничего</span>'}</div>
       </section>${basesZone}</div>
       ${mineHTML}`;

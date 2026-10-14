@@ -502,3 +502,11 @@ button.stat:hover { border-color: #4a5870; }
 /* герои */
 .card.is-hero { box-shadow: 0 0 0 1px var(--fl) inset, 0 0 10px -2px var(--fc); }
 .card.is-hero.mini::after { content: 'герой'; position: absolute; left: 3px; top: 3px; z-index: 2; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; background: rgba(5, 7, 12, .8); color: var(--fl); padding: 0 3px; border-radius: 2px; }
+/* бриллиантовые карты: переливающаяся рамка */
+.card.f-diamond { border-color: transparent; background: linear-gradient(#0f131b, #0f131b) padding-box, linear-gradient(120deg, #7fe9ff, #f3c6ff, #fff6c8, #8affd2, #7fe9ff) border-box; background-size: 100% 100%, 300% 300%; border-width: 2px; animation: diaShine 4s linear infinite; box-shadow: 0 0 14px -2px rgba(127, 233, 255, .55), 0 2px 6px rgba(0, 0, 0, .5); }
+.card.f-diamond .c-head { background: linear-gradient(90deg, #12445a, #2a1f4a 60%, #0f131b); }
+.card.f-diamond .c-name { color: #eafdff; text-shadow: 0 0 6px rgba(127, 233, 255, .6); }
+@keyframes diaShine { 0% { background-position: 0 0, 0% 50%; } 100% { background-position: 0 0, 300% 50%; } }
+.dia-left { position: absolute; left: 50%; transform: translateX(-50%); top: 2.6em; z-index: 3; background: rgba(5, 7, 12, .85); color: #bff6ff; border: 1px solid #3c8aa0; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+.card.mini .dia-left { font-size: 8px; bottom: auto; top: 50%; }
+@media (prefers-reduced-motion: reduce) { .card.f-diamond { animation: none; } }

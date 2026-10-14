@@ -9,6 +9,7 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 function totalCards(g) {
   let n = g.tradeDeck.length + g.row.filter(Boolean).length;
   for (const p of g.players) n += p.deck.length + p.hand.length + p.discard.length + p.inPlay.length + p.bases.length + p.heroes.length;
+  n += (g.diamonds || []).length;
   return n;
 }
 
@@ -59,7 +60,7 @@ for (let i = 0; i < N; i++) {
   const teams = i % 3 === 0;
   const n = teams ? 4 : 2 + (i % 5);
   const players = Array.from({ length: n }, (_, k) => ({ id: 'p' + k, name: 'Бот' + k, team: k % 2 ? 'B' : 'A' }));
-  const g = new Game(players, { authority: [10, 25, 50][i % 3], randomOrder: true, mode: teams ? 'teams' : 'ffa', deckSize: ['auto', '1', '1.5', '2'][i % 4], heroes: i % 2 === 0 });
+  const g = new Game(players, { authority: [10, 25, 50][i % 3], randomOrder: true, mode: teams ? 'teams' : 'ffa', deckSize: ['auto', '1', '1.5', '2'][i % 4], heroes: i % 2 === 0, newCards: i % 5 !== 0, diamonds: i % 3 !== 1 });
   if (teams) teamGames++;
   const start = totalCards(g);
   let steps = 0;
