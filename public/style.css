@@ -510,3 +510,10 @@ button.stat:hover { border-color: #4a5870; }
 .dia-left { position: absolute; left: 50%; transform: translateX(-50%); top: 2.6em; z-index: 3; background: rgba(5, 7, 12, .85); color: #bff6ff; border: 1px solid #3c8aa0; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 3px; white-space: nowrap; }
 .card.mini .dia-left { font-size: 8px; bottom: auto; top: 50%; }
 @media (prefers-reduced-motion: reduce) { .card.f-diamond { animation: none; } }
+/* соперник, которого можно атаковать: вся плашка — кнопка */
+.opp.atk-target { cursor: crosshair; border-color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger), 0 0 14px -4px var(--danger); transition: background .12s; }
+.opp.atk-target:hover { background: #2a1517; }
+.opp.atk-target:active { transform: scale(.99); }
+.atk-hint { color: #ff9c90; font-weight: 700; font-size: 12px; white-space: nowrap; letter-spacing: .02em; }
+/* плашки соперников и напарника — на всю высоту торгового ряда */
+.opps-area .opps { flex: 1 1 auto; grid-auto-rows: minmax(min-content, 1fr); }

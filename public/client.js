@@ -637,8 +637,8 @@
         const can = canAttackBase(C, p, b);
         return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${p.id}" ${can ? `data-act="atkbase" data-target="${p.id}"` : ''}`, badge: stackBadge(all.length) });
       }).join('') + heroesHTML(p.heroes, 'mini', 'opphero');
-      const atk = canAtk ? `<button class="btn danger sm" data-act="atkplayer" data-target="${p.id}">Атаковать</button>` : '';
-      return `<div class="opp ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
+      const atk = canAtk ? `<span class="atk-hint">⚔ атаковать</span>` : '';
+      return `<div class="opp ${(g.active || []).includes(p.id) ? 'turn' : ''} ${p.alive ? '' : 'dead'} ${hit ? 'hit' : ''} ${canAtk ? 'atk-target' : ''}" style="--pc:${colorOf(p.id)}" ${canAtk ? `data-act="atkplayer" data-target="${p.id}" title="Нажмите, чтобы атаковать"` : ''}>
         <div class="opp-head g2"><span class="avatar">${esc(initial(p.name))}</span>
           <div class="nm-line"><b>${esc(p.name)}</b>${m && m.bot ? ' <span class="tag-s bot">бот</span>' : ''}${p.id === r.hostId ? ' <span class="tag-s">хост</span>' : ''}${offline ? ' <span class="tag-s muted">офлайн</span>' : ''}</div>
           <div class="hp-badge ${p.authority <= 10 ? 'low' : ''}" title="Здоровье">${Math.max(0, p.authority)}</div>
@@ -826,11 +826,11 @@
       const can = canAttackBase(C, m, b);
       return cardHTML(b, { size: 'mini', cls: can ? 'targetable' : '', attrs: `data-zone="oppbase" data-owner="${m.id}" ${can ? `data-act="atkbase" data-target="${m.id}"` : ''}`, badge: `<span class="owner-tag">${esc(m.name)}</span>` + stackBadge(all.length) });
     })).join('') + alive.map((m) => heroesHTML(m.heroes, 'mini', 'opphero', m.name)).join('');
-    return `<div class="opp team-card ${isTurn ? 'turn' : ''} ${alive.length ? '' : 'dead'} ${hit ? 'hit' : ''}" style="--pc:${colorOf(p.id)}">
-      <div class="opp-head g2 noav"><div class="nm-line"><b>Команда соперников</b></div>
+    return `<div class="opp team-card ${isTurn ? 'turn' : ''} ${alive.length ? '' : 'dead'} ${hit ? 'hit' : ''} ${canAtk ? 'atk-target' : ''}" style="--pc:${colorOf(p.id)}" ${canAtk ? `data-act="atkplayer" data-target="${target.id}" title="Нажмите, чтобы атаковать команду"` : ''}>
+      <div class="opp-head g2 noav"><div class="nm-line"><b>Соперники</b></div>
         <div class="hp-badge ${hp <= 10 ? 'low' : ''}" title="Здоровье команды">${hp}</div>
         <div class="opp-meta">${alive.length ? `баз ${bases.length}${C.hasOutpost(p) ? ' · 🛡' : ''}` : 'выбыла'}</div>
-        ${alive.length && canAtk ? `<div class="atk"><button class="btn danger sm" data-act="atkplayer" data-target="${target.id}">Атаковать</button></div>` : ''}</div>
+        ${alive.length && canAtk ? `<div class="atk"><span class="atk-hint">⚔ атаковать</span></div>` : ''}</div>
       <div class="tm-list">${members.map(memberLine).join('')}</div>
       ${alive.length ? `${bHTML ? `<div class="zl">Базы команды${C.hasOutpost(p) ? ' · <span class="tag-s">🛡 аванпост защищает команду</span>' : ''}</div>
         <div class="opp-bases">${bHTML}</div>` : ''}
@@ -1095,7 +1095,7 @@
     const el = e.target.closest('[data-act]');
     const card = e.target.closest('.card[data-cid]');
     // нажатие на карту без своего действия — открыть описание
-    if (card && !card.closest('.modal') && (!el || el === card)) {
+    if (card && !card.closest('.modal') && (!el || el === card || (el.contains(card) && el.dataset.act === 'atkplayer'))) {
       const zone = card.dataset.zone;
       const direct = el === card && (zone === 'hand' || (!isTouch && (zone === 'row' || zone === 'oppbase')));
       if (!direct) { cardModal(card); return; }
@@ -1136,7 +1136,15 @@
       case 'scrap': e.stopPropagation(); if (S.modal === 'card') closeModal(); act({ type: 'scrap', uid: d.uid }); break;
       case 'activate': e.stopPropagation(); if (S.modal === 'card') closeModal(); act({ type: 'activate', uid: d.uid }); break;
       case 'atkbase': if (S.modal === 'card') closeModal(); act({ type: 'attackBase', target: d.target, uid: d.uid }); break;
-      case 'atkplayer': S.oppSheet = null; attackModal(d.target); break;
+      case 'atkplayer': {
+        S.oppSheet = null;
+        const g = S.room.game, t = g.players.find((x) => x.id === d.target);
+        const enemyTeams = new Set(g.players.filter((x) => x.alive && x.team !== (g.players.find((m) => m.id === S.pid) || {}).team).map((x) => x.team));
+        // один соперник (или одна команда) — бьём сразу всем нужным уроном; несколько — спросим, сколько
+        if (t && enemyTeams.size === 1) { if (S.modal) closeModal(); act({ type: 'attackPlayer', target: t.id, amount: Math.min(g.pool.combat, Math.max(1, t.authority)) }); }
+        else attackModal(d.target);
+        break;
+      }
       case 'opp-sheet': oppSheet(d.pid); break;
       case 'endturn': endTurnCheck(); break;
       case 'view-discard': showDiscard(d.pid); break;
