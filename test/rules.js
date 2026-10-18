@@ -362,6 +362,21 @@ t('бриллиантовые карты: появляются в ряду не 
   } finally { Math.random = rnd; }
 });
 
+t('бриллиантовые карты: когда торговая колода кончилась, выходят все подряд и не исчезают', () => {
+  const g = new Game([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], { authority: 50, diamonds: true, randomOrder: false });
+  g.tradeDeck = [];
+  for (let i = 0; i < 5; i++) g.refillRow(i);
+  assert.equal(g.row.filter((c) => c && c.cid.startsWith('d_')).length, 5, 'в ряду сразу 5 бриллиантовых');
+  assert.ok(g.row.every((c) => !c.expires), 'без срока');
+  g.refillRow(0);
+  assert.equal(g.diamonds.length, 0);
+  g.refillRow(0);
+  assert.equal(g.row[0], null, 'запас кончился — место пустое');
+  const t = g.turnNo;
+  while (g.turnNo < t + 8) g.act(g.active()[0].id, { type: 'endTurn' });
+  assert.equal(g.row.filter((c) => c && c.cid.startsWith('d_')).length, 4, 'никуда не исчезли');
+});
+
 t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
   const g = teams();
   const t0 = g.turnNo;

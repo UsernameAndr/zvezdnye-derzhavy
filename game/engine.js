@@ -360,14 +360,25 @@ class Game {
   refillRow(i) {
     this.revealSeq++;
     const hasDiamond = this.row.some((c, k) => k !== i && c && def(c).rarity === 'diamond');
-    if (this.diamonds && this.diamonds.length && !hasDiamond && Math.random() < DIAMOND_CHANCE) {
+    if (this.tradeDeck.length && this.diamonds && this.diamonds.length && !hasDiamond && Math.random() < DIAMOND_CHANCE) {
       const d = this.diamonds.pop();
       d.expires = this.turnNo + DIAMOND_ROUNDS * this.teamOrder.filter((t) => this.teamAlive(t)).length;
       this.row[i] = d;
       this.addLog(`💎 В торговом ряду появилась бриллиантовая карта «${def(d).name}»!`, 'win');
       return;
     }
-    this.row[i] = this.tradeDeck.pop() || null;
+    if (this.tradeDeck.length) { this.row[i] = this.tradeDeck.pop(); return; }
+    // основная колода кончилась — выкладываем оставшиеся бриллиантовые карты, уже без ограничений
+    this.row[i] = this.diamondFinale();
+  }
+
+  // бриллиантовая карта на пустое место, когда торговая колода закончилась (лежит, пока не купят)
+  diamondFinale() {
+    if (!this.diamonds || !this.diamonds.length) return null;
+    const d = this.diamonds.pop();
+    delete d.expires;
+    this.addLog(`💎 Торговая колода кончилась — в ряд выходит «${def(d).name}»`, 'win');
+    return d;
   }
 
   handlePick(pr, uids, srcRef) {
@@ -463,7 +474,8 @@ class Game {
     this.undoStack = [];
     // бриллиантовую карту, которую никто не купил за несколько кругов, уносит из ряда
     this.row.forEach((c, i) => {
-      if (c && def(c).rarity === 'diamond' && c.expires && c.expires <= this.turnNo) {
+      // когда основная колода пуста, бриллиантовые карты больше не исчезают
+      if (c && def(c).rarity === 'diamond' && c.expires && c.expires <= this.turnNo && this.tradeDeck.length) {
         this.diamonds.push(clean(c)); shuffle(this.diamonds);
         this.row[i] = this.tradeDeck.pop() || null;
         this.addLog(`💎 «${def(c).name}» исчезает из торгового ряда`, 'sys');
