@@ -285,7 +285,7 @@
       <div class="d-sub">${emblem(d.faction)}${d.faction2 ? emblem(d.faction2) : ''} ${typeName(d)}${d.faction !== 'none' ? ' · ' + F.name + (d.faction2 ? ' + ' + FACTIONS[d.faction2].name : '') : ''}${d.cost ? ` · цена ${d.cost}` : ''}${d.type === 'base' ? ` · защита ${d.defense}` : ''}</div>
       <p class="d-type">${typeExplain(d)}</p>`;
     if (d.primary.length) info += `<h5>${d.type === 'base' ? 'Каждый ваш ход' : 'Когда разыграна'}</h5>${list(d.primary)}`;
-    if (d.fleetHQ) info += `<h5>Постоянно</h5><ul><li>Каждый корабль, который вы играете, даёт дополнительно +1 урона.</li></ul>`;
+    if (d.fleetHQ) info += `<h5>Постоянно</h5><ul><li>Каждый ваш корабль даёт дополнительно +1 урона — в том числе корабли, сыгранные в этот ход ещё до постройки базы.</li></ul>`;
     if (d.rarity === 'diamond') info += `<h5>💎 Бриллиантовая карта</h5><p class="muted">Редкая и очень дорогая. Появляется в торговом ряду сама и ненадолго: если её не купят за 3 круга, она исчезнет. Считается союзником для карт любой фракции.</p>`;
     else if (d.allAlly) info += `<h5>Постоянно</h5><ul><li>Пока эта база в игре, у всех ваших карт срабатывают союзные способности.</li></ul>`;
     if (d.faction2) info += `<h5>Две фракции</h5><p class="muted">Карта считается и «${F.name}», и «${FACTIONS[d.faction2].name}»: она союзник для карт обеих фракций.</p>`;

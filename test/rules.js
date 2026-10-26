@@ -401,6 +401,20 @@ t('Банк Лиги с прошлого хода: карта Лиги на ст
   assert.ok(p.bases[0].used.ally);
 });
 
+t('Адмиралтейство даёт +1 урона и за корабли, сыгранные до него', () => {
+  const { g } = setup(2, ['viper', 'viper', 'e_hq', 'viper']);
+  const p = g.pl('p0');
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });
+  assert.equal(g.pool.combat, 2);
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });   // база: +2 за двух уже сыгранных
+  assert.equal(g.pool.combat, 4);
+  g.act('p0', { type: 'play', uid: p.hand[0].uid });   // корабль после базы: 1 + 1
+  assert.equal(g.pool.combat, 6);
+  g.act('p0', { type: 'undo', uid: p.bases[0].uid }); // вернули базу — бонус ушёл
+  assert.equal(g.pool.combat, 2);
+});
+
 t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
   const g = teams();
   const t0 = g.turnNo;

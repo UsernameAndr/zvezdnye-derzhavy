@@ -713,6 +713,11 @@ class Game {
       p.bases.push(c);
       this.addLog(`${p.name} строит ${d.outpost ? 'аванпост' : 'базу'} «${d.name}»`, 'play');
       if (isAuto(d.primary)) { c.used.primary = true; this.enqueueFront(d.primary, c, p.id); }
+      // Адмиралтейство: +1 урона и за корабли, сыгранные в этот ход до него
+      if (d.fleetHQ && p.inPlay.length) {
+        this.pool.combat += p.inPlay.length;
+        this.addLog(`«${d.name}»: +${p.inPlay.length} урона за уже сыгранные корабли`);
+      }
     } else {
       p.inPlay.push(c);
       c.used.primary = true;
