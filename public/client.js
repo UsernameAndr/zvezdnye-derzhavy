@@ -758,7 +758,11 @@
         + (me.heroes || []).map((h) => cardHTML(h, { size: ps, cls: 'hero-card', attrs: 'data-zone="myhero"', actions: myTurn && !blocked ? `<button class="mini-btn use" data-act="scrap" data-uid="${h.uid}">${mobile ? '⚔ В бой' : '⚔ Отправить в бой'}</button>` : '', badge: teams ? '<span class="owner-tag">ваш герой</span>' : '' })).join('')
         + (teams && mate && mate.alive ? heroesHTML(mate.heroes, ps, 'matehero', mate.name) : '');
       const hasHeroes = (me.heroes || []).length || (teams && mate && (mate.heroes || []).length);
-      const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: myTurn && !blocked ? 'playable' : '', attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
+      // карты, взятые посреди хода (союз, добор), подсвечиваем — чтобы было видно, что карта пришла
+      const handIds = (me.hand || []).map((c) => c.uid);
+      if (S.handTurn !== g.turnNo) { S.handTurn = g.turnNo; S.handSeen = new Set(handIds); S.fresh = new Set(); }
+      for (const u of handIds) if (!S.handSeen.has(u)) { S.handSeen.add(u); S.fresh.add(u); setTimeout(() => { S.fresh.delete(u); const el = document.querySelector(`.hand [data-uid="${u}"]`); if (el) el.classList.remove('fresh'); }, 2600); }
+      const hand = (me.hand || []).map((c) => cardHTML(c, { size: mobile ? 'mini' : 'md', cls: (myTurn && !blocked ? 'playable' : '') + (S.fresh.has(c.uid) ? ' fresh' : ''), attrs: `data-zone="hand" ${myTurn && !blocked ? 'data-act="play"' : ''}` })).join('');
       const top = me.discard[me.discard.length - 1];
       basesZone = `<section class="zone bases-zone ${tip.cue === 'bases' ? 'cue' : ''} ${bases ? '' : 'empty'}"><div class="zl">${hasHeroes ? (teams ? 'Базы и герои команды' : 'Ваши базы и герои') : teams ? `Базы команды${g.players.some((x) => x.team === me.team && x.alive && x.bases.some((b) => CARDS[b.cid].outpost)) ? ' · 🛡 аванпост защищает вас обоих' : ''}` : 'Ваши базы'}</div><div class="strip">${bases || '<span class="none">Здесь будут ваши базы</span>'}</div></section>`;
       mineHTML = `

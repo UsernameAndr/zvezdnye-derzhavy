@@ -389,6 +389,18 @@ t('Матка-носитель может бесплатно взять и бр�
   assert.ok(!g.row.some((c) => c && c.uid === 'dia'));
 });
 
+t('Банк Лиги с прошлого хода: карта Лиги на столе — берём карту', () => {
+  const g = new Game([{ id: 'p0', name: 'A' }, { id: 'p1', name: 'B' }], { authority: 50, randomOrder: false });
+  const p = g.pl('p0');
+  p.bases.push({ uid: 'bank', cid: 't_bank', used: {} });
+  g.timeout(); g.timeout();                     // банк лежит с прошлого хода
+  p.hand.push({ uid: 'x', cid: 't_cutter' });
+  const h = p.hand.length;
+  g.act('p0', { type: 'play', uid: 'x' });
+  assert.equal(p.hand.length, h, 'сыграли одну, взяли одну');
+  assert.ok(p.bases[0].used.ally);
+});
+
 t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
   const g = teams();
   const t0 = g.turnNo;
