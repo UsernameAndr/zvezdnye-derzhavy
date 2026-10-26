@@ -809,7 +809,7 @@
       ${mqWide.matches ? `<section class="opps-area"><div class="opps ${tip.cue === 'opps' ? 'cue' : ''}">${oppHTML}${mateHTML}</div></section>` : ''}
       </div>
       <div class="table-row"><section class="zone play-zone" style="--pc:${colorOf(cur.id)}">
-        <div class="zl">${isMe ? (teams ? 'Сыграно вашей командой' : 'Вы сыграли') : `Сыграно: ${C.curName}`} ${!isMe ? `<span class="muted">· деньги ${trade} · урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}${g.toHand ? ' <span class="tag-s">следующая покупка — в руку</span>' : ''}</div>
+        <div class="zl">${isMe ? (teams ? 'Сыграно вашей командой' : 'Вы сыграли') : `Сыграно: ${C.curName}`} ${!isMe ? `<span class="muted">${teams ? '' : `· деньги ${(g.purse || {})[cur.id] || 0} `}· урон ${combat}</span>` : ''}${g.topNext ? ' <span class="tag-s">следующий корабль — на верх колоды</span>' : ''}${g.toHand ? ' <span class="tag-s">следующая покупка — в руку</span>' : ''}</div>
         <div class="strip">${playHTML || '<span class="none">Пока ничего</span>'}</div>
       </section>${basesZone}</div>
       ${mineHTML}`;
