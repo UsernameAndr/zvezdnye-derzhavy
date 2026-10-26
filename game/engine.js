@@ -284,7 +284,7 @@ class Game {
         this.addLog(`Следующий купленный в этот ход корабль ляжет на верх колоды`);
         break;
       case 'freeShip': {
-        const cards = this.row.filter((c) => c && def(c).type === 'ship' && def(c).rarity !== 'diamond').map((c) => ({ ...clean(c), zone: 'row' }));
+        const cards = this.row.filter((c) => c && def(c).type === 'ship').map((c) => ({ ...clean(c), zone: 'row' }));
         if (this.explorers > 0) cards.push({ uid: 'explorer', cid: 'explorer', zone: 'explorer' });
         if (cards.length) this.setPrompt({ kind: 'pick', purpose: 'freeShip', min: 0, max: 1, cards, text: `${srcName}: возьмите любой корабль бесплатно — он ляжет на верх колоды` }, src);
         break;

@@ -377,6 +377,18 @@ t('бриллиантовые карты: когда торговая колод
   assert.equal(g.row.filter((c) => c && c.cid.startsWith('d_')).length, 4, 'никуда не исчезли');
 });
 
+t('Матка-носитель может бесплатно взять и бриллиантовый корабль', () => {
+  const { g } = setup(2, ['b_carrier', 'b_fighter']);
+  g.row[0] = { uid: 'dia', cid: 'd_supernova', expires: 99 };
+  g.act('p0', { type: 'playAll' });
+  const pr = g.promptOf('p0');
+  assert.ok(pr && pr.purpose === 'freeShip' && pr.cards.some((c) => c.uid === 'dia'));
+  g.act('p0', { type: 'answer', uids: ['dia'] });
+  const p = g.pl('p0');
+  assert.ok([...p.deck, ...p.hand].some((c) => c.uid === 'dia'), 'корабль у игрока (на верху колоды или уже взят в руку)');
+  assert.ok(!g.row.some((c) => c && c.uid === 'dia'));
+});
+
 t('2×2: время вышло, когда окна открыты у обоих напарников', () => {
   const g = teams();
   const t0 = g.turnNo;
